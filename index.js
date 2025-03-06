@@ -43,8 +43,12 @@ let pricesData = null;
 async function updateData() {
     try {
         console.log('Iniziando aggiornamento dati...');
-        const stations = await downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv');
-        const prices = await downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/prezzo_alle_8.csv');
+        try{
+            const stations = await downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv');
+            const prices = await downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/prezzo_alle_8.csv');
+        }catch(err){
+            console.log(err);    
+        }
         
         if (stations.length > 0 && prices.length > 0) {
             stationsData = stations.slice(1);
