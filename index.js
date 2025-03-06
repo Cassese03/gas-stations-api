@@ -1,17 +1,22 @@
 const express = require('express');
 const csv = require('csv-parser');
 const fetch = require('node-fetch');
-const fs = require('fs');
 const { Readable } = require('stream');
 
 const app = express();
-const port = process.env.PORT || 3000;  // Modifica qui per usare la porta di Vercel se disponibile
+
+// Cache per i dati con timestamp
+let cache = {
+  stationsData: null,
+  pricesData: null,
+  lastUpdate: null
+};
 
 // Funzione per calcolare la distanza tra due punti usando la formula di Haversine
 function calculateDistance(lat1, lon1, lat2, lon2) {
     const R = 6371; // Raggio della Terra in km
     const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const dLon = (lon1 - lon2) * Math.PI / 180;
     const a = 
         Math.sin(dLat/2) * Math.sin(dLat/2) +
         Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
@@ -20,54 +25,59 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
     return R * c;
 }
 
-// Funzione per scaricare e parsare i CSV
 async function downloadAndParseCSV(url) {
-    const response = await fetch(url);
-    const buffer = await response.buffer();
-    const results = [];
-    
-    return new Promise((resolve, reject) => {
-        Readable.from(buffer)
-            .pipe(csv({ separator: ';' }))
-            .on('data', (data) => results.push(data))
-            .on('end', () => resolve(results))
-            .on('error', (error) => reject(error));
-    });
+    try {
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Accept': 'text/csv,application/csv'
+            }
+        });
+
+        return new Promise((resolve, reject) => {
+            const results = [];
+            Readable.from(response.body)
+                .pipe(csv({ separator: ';' }))
+                .on('data', (data) => results.push(data))
+                .on('end', () => resolve(results))
+                .on('error', (error) => reject(error));
+        });
+    } catch (error) {
+        console.error('Download error:', error.message);
+        throw error;
+    }
 }
 
-// Cache per i dati
-let stationsData = null;
-let pricesData = null;
+async function updateDataIfNeeded() {
+    // Aggiorna i dati solo se sono passate più di 2 ore dall'ultimo aggiornamento
+    const TWO_HOURS = 2 * 60 * 60 * 1000;
+    
+    if (!cache.lastUpdate || (Date.now() - cache.lastUpdate) > TWO_HOURS) {
+        try {
+            console.log('Aggiornamento dati...');
+            const [stations, prices] = await Promise.all([
+                downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv'),
+                downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/prezzo_alle_8.csv')
+            ]);
 
-// Funzione per aggiornare i dati
-async function updateData() {
-    try {
-        console.log('Iniziando aggiornamento dati...');
-        const stations = await downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv');
-        const prices = await downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/prezzo_alle_8.csv');
-        
-        if (stations.length > 0 && prices.length > 0) {
-            stationsData = stations.slice(1);
-            pricesData = prices.slice(1);
-            console.log('Dati aggiornati con successo');
-        } else {
-            throw new Error('Dati vuoti ricevuti');
-        }
-    } catch (error) {
-        console.error('Errore durante l\'aggiornamento dei dati:', error);
-        // Non sovrascrivere i dati esistenti in caso di errore
-        if (!stationsData || !pricesData) {
-            stationsData = [];
-            pricesData = [];
+            if (stations?.length && prices?.length) {
+                cache.stationsData = stations.slice(1);
+                cache.pricesData = prices.slice(1);
+                cache.lastUpdate = Date.now();
+                console.log('Dati aggiornati con successo');
+            }
+        } catch (error) {
+            console.error('Errore aggiornamento:', error.message);
+            if (!cache.stationsData) cache.stationsData = [];
+            if (!cache.pricesData) cache.pricesData = [];
         }
     }
 }
 
-// Aggiorna i dati ogni ora
-updateData();
-setInterval(updateData, 3600000);
-
-app.get('/gas-stations', (req, res) => {
+// Modifica i route handler per usare la cache
+app.get('/gas-stations', async (req, res) => {
+    await updateDataIfNeeded();
+    
     const { lat, lng, distance } = req.query;
     
     if (!lat || !lng || !distance) {
@@ -77,7 +87,7 @@ app.get('/gas-stations', (req, res) => {
         });
     }
 
-    if (!stationsData || !pricesData) {
+    if (!cache.stationsData || !cache.pricesData) {
         return res.status(503).json({
             status: 'error',
             message: 'Dati non ancora disponibili'
@@ -89,7 +99,7 @@ app.get('/gas-stations', (req, res) => {
     const maxDistance = parseFloat(distance);
 
     // Filtra le stazioni per distanza e aggiungi i prezzi
-    let nearbyStations = stationsData
+    let nearbyStations = cache.stationsData
         .filter(station => {
             // Usa i nomi corretti dei campi per le coordinate
             const stationLat = parseFloat(station['_8']);
@@ -104,7 +114,7 @@ app.get('/gas-stations', (req, res) => {
         })
         .map(station => {
             const stationId = station['Estrazione del 2025-03-05'];
-            const stationPrices = pricesData.filter(p => p['Estrazione del 2025-03-05'] === stationId);
+            const stationPrices = cache.pricesData.filter(p => p['Estrazione del 2025-03-05'] === stationId);
 
             return {
                 id_stazione: stationId,
@@ -135,27 +145,29 @@ app.get('/gas-stations', (req, res) => {
     res.json({
         status: 'success',
         timestamp: new Date().toISOString(),
-        totale_stazioni: stationsData.length,
+        totale_stazioni: cache.stationsData.length,
         stazioni_trovate: nearbyStations.length,
         stations: nearbyStations
     });
 });
 
-app.get('/top-stations', (req, res) => {
-    if (!stationsData || !pricesData) {
+app.get('/top-stations', async (req, res) => {
+    await updateDataIfNeeded();
+    
+    if (!cache.stationsData || !cache.pricesData) {
         return res.status(503).json({ status: 'error', message: 'Dati non disponibili' });
     }
 
-    console.log('Prima stazione:', stationsData[0]);
-    console.log('Primo prezzo:', pricesData[0]);
+    console.log('Prima stazione:', cache.stationsData[0]);
+    console.log('Primo prezzo:', cache.pricesData[0]);
 
-    const topStations = stationsData
+    const topStations = cache.stationsData
         .slice(0, 10)
         .map(station => {
             // Usa il campo ID corretto
             const stationId = station['Estrazione del 2025-03-05'] || station['Estrazione del 2025-03-05'];
             // Trova i prezzi usando l'ID corretto
-            const stationPrices = pricesData.filter(p => p['Estrazione del 2025-03-05'] === stationId);
+            const stationPrices = cache.pricesData.filter(p => p['Estrazione del 2025-03-05'] === stationId);
             return {
                 id_stazione: stationId,
                 bandiera: station['_2'],
@@ -177,29 +189,33 @@ app.get('/top-stations', (req, res) => {
                 prezzi_carburanti: stationPrices.map(price => ({
                     tipo: price['_1'],
                     prezzo: parseFloat(price['_2']?.replace(',', '.')) || null,
+                    prezzo: parseFloat(price['_2']?.replace(',', '.')) || null,
                     self_service: price['_3'] === '1',
                     ultimo_aggiornamento: price['_4']
                 }))
             };
         });
-//aggiusta qui todo
+
     res.json({
         status: 'success',
         timestamp: new Date().toISOString(),
-        totale_stazioni: stationsData.length,
+        totale_stazioni: cache.stationsData.length,
         stazioni_mostrate: topStations.length,
         stations: topStations,
        // debug: {
-       //     esempio_stazione: stationsData[0],
-       //     esempio_prezzo: pricesData[0]
+       //     esempio_stazione: cache.stationsData[0],
+       //     esempio_prezzo: cache.pricesData[0]
        // }
     });
 });
 
+// Configurazione della porta
+const PORT = process.env.PORT || 3000;
+
+// Avvio del server
 if (require.main === module) {
-    const server = app.listen(process.env.PORT || port, () => {
-        console.log(`Server in esecuzione sulla porta ${process.env.PORT || port}`);
-        updateData().catch(console.error);
+    app.listen(PORT, () => {
+        console.log(`Server is running on port ${PORT}`);
     });
 }
 
