@@ -3,11 +3,9 @@ const csv = require('csv-parser');
 const fetch = require('node-fetch');
 const fs = require('fs');
 const { Readable } = require('stream');
-const https = require('https');
-const tunnel = require('tunnel');
 
 const app = express();
-const port = 3000;
+const port = process.env.PORT || 3000;  // Modifica qui per usare la porta di Vercel se disponibile
 
 // Funzione per calcolare la distanza tra due punti usando la formula di Haversine
 function calculateDistance(lat1, lon1, lat2, lon2) {
@@ -22,61 +20,19 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
     return R * c;
 }
 
-// Configurazione dell'agente HTTPS
-const agent = new https.Agent({
-    rejectUnauthorized: false,
-    keepAlive: true,
-    timeout: 60000
-});
-
-// Funzione per convertire URL in HTTPS
-function ensureHttps(url) {
-    return url.replace('http:', 'https:');
-}
-
+// Funzione per scaricare e parsare i CSV
 async function downloadAndParseCSV(url) {
-    try {
-        // Assicurati che l'URL sia HTTPS
-        const secureUrl = ensureHttps(url);
-        console.log('Tentativo download da:', secureUrl);
-
-        const response = await fetch(secureUrl, {
-            agent,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Accept': 'text/csv,application/csv',
-                'Connection': 'keep-alive'
-            },
-            timeout: 60000,
-            compress: true
-        });
-
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        const buffer = await response.buffer();
-        const results = [];
-        
-        return new Promise((resolve, reject) => {
-            Readable.from(buffer)
-                .pipe(csv({ 
-                    separator: ';',
-                    stripBOM: true,
-                    skip_empty_lines: true
-                }))
-                .on('data', (data) => results.push(data))
-                .on('end', () => resolve(results))
-                .on('error', (error) => reject(error));
-        });
-    } catch (error) {
-        console.error('Errore dettagliato nel download:', {
-            url: url,
-            error: error.message,
-            stack: error.stack
-        });
-        throw error;
-    }
+    const response = await fetch(url);
+    const buffer = await response.buffer();
+    const results = [];
+    
+    return new Promise((resolve, reject) => {
+        Readable.from(buffer)
+            .pipe(csv({ separator: ';' }))
+            .on('data', (data) => results.push(data))
+            .on('end', () => resolve(results))
+            .on('error', (error) => reject(error));
+    });
 }
 
 // Cache per i dati
@@ -87,26 +43,10 @@ let pricesData = null;
 async function updateData() {
     try {
         console.log('Iniziando aggiornamento dati...');
+        const stations = await downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv');
+        const prices = await downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/prezzo_alle_8.csv');
         
-        const urls = {
-            stations: 'https://www.mise.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv',
-            prices: 'https://www.mise.gov.it/images/exportCSV/prezzo_alle_8.csv'
-        };
-
-        let stations = null;
-        let prices = null;
-
-        try {
-            stations = await downloadAndParseCSV(urls.stations);
-            console.log('Download stazioni completato');
-            prices = await downloadAndParseCSV(urls.prices);
-            console.log('Download prezzi completato');
-        } catch (err) {
-            console.error('Errore nel download:', err);
-            throw err;
-        }
-
-        if (stations?.length > 0 && prices?.length > 0) {
+        if (stations.length > 0 && prices.length > 0) {
             stationsData = stations.slice(1);
             pricesData = prices.slice(1);
             console.log('Dati aggiornati con successo');
@@ -114,7 +54,7 @@ async function updateData() {
             throw new Error('Dati vuoti ricevuti');
         }
     } catch (error) {
-        console.error('Errore completo:', error);
+        console.error('Errore durante l\'aggiornamento dei dati:', error);
         // Non sovrascrivere i dati esistenti in caso di errore
         if (!stationsData || !pricesData) {
             stationsData = [];
