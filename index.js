@@ -198,6 +198,12 @@ app.get('/top-stations', (req, res) => {
     });
 });
 
-app.listen(port, () => {
-    console.log(`Server in esecuzione sulla porta ${port}`);
-});
+if (require.main === module) {
+    app.listen(port, () => {
+        console.log(`Server in esecuzione sulla porta ${port}`);
+        // Esegui subito l'aggiornamento dei dati all'avvio
+        updateData().catch(console.error);
+    });
+}
+
+module.exports = app;

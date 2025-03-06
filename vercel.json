@@ -15,5 +15,11 @@
         "cache-control": "s-maxage=0"
       }
     }
-  ]
+  ],
+  "functions": {
+    "api/*.js": {
+      "memory": 1024,
+      "maxDuration": 60
+    }
+  }
 }
