@@ -1,0 +1,24 @@
+{
+  "name": "gas-stations-api",
+  "version": "1.0.0",
+  "description": "API per stazioni di servizio italiane",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "keywords": ["api", "gas-stations", "italy"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.2",
+    "csv-parser": "^3.0.0",
+    "node-fetch": "^2.6.9"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.22"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
