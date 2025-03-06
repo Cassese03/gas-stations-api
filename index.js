@@ -20,105 +20,42 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
     return R * c;
 }
 
-// Funzione di delay per il retry
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-
-// Funzione per scaricare e parsare i CSV con retry
-async function downloadAndParseCSV(url, retries = 3) {
-    const proxyUrl = 'https://corsproxy.io/?';
+// Funzione per scaricare e parsare i CSV
+async function downloadAndParseCSV(url) {
+    const response = await fetch(url);
+    const buffer = await response.buffer();
+    const results = [];
     
-    for (let i = 0; i < retries; i++) {
-        try {
-            console.log(`Tentativo ${i + 1} di ${retries} per ${url}`);
-            const response = await fetch(proxyUrl + encodeURIComponent(url), {
-                timeout: 30000, // Aumentato a 30 secondi
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                    'Accept': 'text/csv,application/csv,text/plain',
-                    'Cache-Control': 'no-cache'
-                }
-            });
-
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-
-            const buffer = await response.buffer();
-            const results = [];
-            
-            return new Promise((resolve, reject) => {
-                Readable.from(buffer)
-                    .pipe(csv({ 
-                        separator: ';',
-                        skipLines: 0,
-                        strict: false
-                    }))
-                    .on('data', (data) => results.push(data))
-                    .on('end', () => resolve(results))
-                    .on('error', (error) => reject(error));
-            });
-        } catch (error) {
-            console.error(`Tentativo ${i + 1} fallito:`, error.message);
-            if (i === retries - 1) throw error;
-            // Aumenta il delay tra i tentativi
-            await delay(5000 * (i + 1)); // 5, 10, 15 secondi
-        }
-    }
+    return new Promise((resolve, reject) => {
+        Readable.from(buffer)
+            .pipe(csv({ separator: ';' }))
+            .on('data', (data) => results.push(data))
+            .on('end', () => resolve(results))
+            .on('error', (error) => reject(error));
+    });
 }
 
 // Cache per i dati
 let stationsData = null;
 let pricesData = null;
 
-// Modifica la funzione updateData per gestire meglio gli errori
+// Funzione per aggiornare i dati
 async function updateData() {
     try {
         console.log('Iniziando aggiornamento dati...');
+        const stations = await downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv');
+        const prices = await downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/prezzo_alle_8.csv');
         
-        // Array di URL di backup
-        const urls = {
-            stations: [
-                'https://www.mise.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv',
-                'https://www.mise.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv', // URL alternativo se disponibile
-            ],
-            prices: [
-                'https://www.mise.gov.it/images/exportCSV/prezzo_alle_8.csv',
-                'https://www.mise.gov.it/images/exportCSV/prezzo_alle_8.csv' // URL alternativo se disponibile
-            ]
-        };
-
-        let stations = null;
-        let prices = null;
-
-        // Prova ciascun URL fino a quando uno funziona
-        for (const stationUrl of urls.stations) {
-            try {
-                stations = await downloadAndParseCSV(stationUrl);
-                break;
-            } catch (error) {
-                console.error(`Errore con URL ${stationUrl}:`, error.message);
-            }
-        }
-
-        for (const priceUrl of urls.prices) {
-            try {
-                prices = await downloadAndParseCSV(priceUrl);
-                break;
-            } catch (error) {
-                console.error(`Errore con URL ${priceUrl}:`, error.message);
-            }
-        }
-
-        if (stations?.length > 0 && prices?.length > 0) {
+        if (stations.length > 0 && prices.length > 0) {
             stationsData = stations.slice(1);
             pricesData = prices.slice(1);
             console.log('Dati aggiornati con successo');
         } else {
-            throw new Error('Impossibile ottenere i dati da tutte le fonti');
+            throw new Error('Dati vuoti ricevuti');
         }
     } catch (error) {
         console.error('Errore durante l\'aggiornamento dei dati:', error);
-        // Mantieni i dati vecchi se esistono
+        // Non sovrascrivere i dati esistenti in caso di errore
         if (!stationsData || !pricesData) {
             stationsData = [];
             pricesData = [];
