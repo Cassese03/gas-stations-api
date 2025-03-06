@@ -25,12 +25,17 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 // Funzione per scaricare e parsare i CSV con retry
 async function downloadAndParseCSV(url, retries = 3) {
+    const proxyUrl = 'https://corsproxy.io/?';
+    
     for (let i = 0; i < retries; i++) {
         try {
-            const response = await fetch(url, {
-                timeout: 10000, // 10 secondi di timeout
+            console.log(`Tentativo ${i + 1} di ${retries} per ${url}`);
+            const response = await fetch(proxyUrl + encodeURIComponent(url), {
+                timeout: 30000, // Aumentato a 30 secondi
                 headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    'Accept': 'text/csv,application/csv,text/plain',
+                    'Cache-Control': 'no-cache'
                 }
             });
 
@@ -43,7 +48,11 @@ async function downloadAndParseCSV(url, retries = 3) {
             
             return new Promise((resolve, reject) => {
                 Readable.from(buffer)
-                    .pipe(csv({ separator: ';' }))
+                    .pipe(csv({ 
+                        separator: ';',
+                        skipLines: 0,
+                        strict: false
+                    }))
                     .on('data', (data) => results.push(data))
                     .on('end', () => resolve(results))
                     .on('error', (error) => reject(error));
@@ -51,7 +60,8 @@ async function downloadAndParseCSV(url, retries = 3) {
         } catch (error) {
             console.error(`Tentativo ${i + 1} fallito:`, error.message);
             if (i === retries - 1) throw error;
-            await delay(2000 * (i + 1)); // Attendi 2, 4, 6 secondi tra i tentativi
+            // Aumenta il delay tra i tentativi
+            await delay(5000 * (i + 1)); // 5, 10, 15 secondi
         }
     }
 }
@@ -69,11 +79,11 @@ async function updateData() {
         const urls = {
             stations: [
                 'https://www.mise.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv',
-                // URL di backup se ne hai
+                'https://www.mise.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv', // URL alternativo se disponibile
             ],
             prices: [
                 'https://www.mise.gov.it/images/exportCSV/prezzo_alle_8.csv',
-                // URL di backup se ne hai
+                'https://www.mise.gov.it/images/exportCSV/prezzo_alle_8.csv' // URL alternativo se disponibile
             ]
         };
 
