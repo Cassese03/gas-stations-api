@@ -1,6 +1,6 @@
 const express = require('express');
 const csv = require('csv-parser');
-const fetch = require('node-fetch');
+const fetch = require('node-fetch');  // Modifica qui: rimosso l'import dinamico
 const fs = require('fs');
 const { Readable } = require('stream');
 
