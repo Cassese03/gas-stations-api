@@ -1,7 +1,5 @@
 {
   "version": 2,
-  "buildCommand": "node index.js",
-  "outputDirectory": ".",
   "builds": [
     {
       "src": "index.js",
@@ -15,6 +13,7 @@
     }
   ],
   "env": {
-    "NODE_TLS_REJECT_UNAUTHORIZED": "0"
+    "NODE_TLS_REJECT_UNAUTHORIZED": "0",
+    "NODE_ENV": "production"
   }
 }

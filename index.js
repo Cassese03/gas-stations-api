@@ -29,9 +29,18 @@ const agent = new https.Agent({
     timeout: 60000
 });
 
+// Funzione per convertire URL in HTTPS
+function ensureHttps(url) {
+    return url.replace('http:', 'https:');
+}
+
 async function downloadAndParseCSV(url) {
     try {
-        const response = await fetch(url, {
+        // Assicurati che l'URL sia HTTPS
+        const secureUrl = ensureHttps(url);
+        console.log('Tentativo download da:', secureUrl);
+
+        const response = await fetch(secureUrl, {
             agent,
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -61,7 +70,11 @@ async function downloadAndParseCSV(url) {
                 .on('error', (error) => reject(error));
         });
     } catch (error) {
-        console.error('Errore nel download:', error);
+        console.error('Errore dettagliato nel download:', {
+            url: url,
+            error: error.message,
+            stack: error.stack
+        });
         throw error;
     }
 }
@@ -74,13 +87,19 @@ let pricesData = null;
 async function updateData() {
     try {
         console.log('Iniziando aggiornamento dati...');
+        
+        const urls = {
+            stations: 'https://www.mise.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv',
+            prices: 'https://www.mise.gov.it/images/exportCSV/prezzo_alle_8.csv'
+        };
+
         let stations = null;
         let prices = null;
 
         try {
-            stations = await downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv');
+            stations = await downloadAndParseCSV(urls.stations);
             console.log('Download stazioni completato');
-            prices = await downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/prezzo_alle_8.csv');
+            prices = await downloadAndParseCSV(urls.prices);
             console.log('Download prezzi completato');
         } catch (err) {
             console.error('Errore nel download:', err);
@@ -95,7 +114,7 @@ async function updateData() {
             throw new Error('Dati vuoti ricevuti');
         }
     } catch (error) {
-        console.error('Errore durante l\'aggiornamento dei dati:', error);
+        console.error('Errore completo:', error);
         // Non sovrascrivere i dati esistenti in caso di errore
         if (!stationsData || !pricesData) {
             stationsData = [];
