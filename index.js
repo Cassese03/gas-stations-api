@@ -20,42 +20,95 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
     return R * c;
 }
 
-// Funzione per scaricare e parsare i CSV
-async function downloadAndParseCSV(url) {
-    const response = await fetch(url);
-    const buffer = await response.buffer();
-    const results = [];
-    
-    return new Promise((resolve, reject) => {
-        Readable.from(buffer)
-            .pipe(csv({ separator: ';' }))
-            .on('data', (data) => results.push(data))
-            .on('end', () => resolve(results))
-            .on('error', (error) => reject(error));
-    });
+// Funzione di delay per il retry
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+// Funzione per scaricare e parsare i CSV con retry
+async function downloadAndParseCSV(url, retries = 3) {
+    for (let i = 0; i < retries; i++) {
+        try {
+            const response = await fetch(url, {
+                timeout: 10000, // 10 secondi di timeout
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const buffer = await response.buffer();
+            const results = [];
+            
+            return new Promise((resolve, reject) => {
+                Readable.from(buffer)
+                    .pipe(csv({ separator: ';' }))
+                    .on('data', (data) => results.push(data))
+                    .on('end', () => resolve(results))
+                    .on('error', (error) => reject(error));
+            });
+        } catch (error) {
+            console.error(`Tentativo ${i + 1} fallito:`, error.message);
+            if (i === retries - 1) throw error;
+            await delay(2000 * (i + 1)); // Attendi 2, 4, 6 secondi tra i tentativi
+        }
+    }
 }
 
 // Cache per i dati
 let stationsData = null;
 let pricesData = null;
 
-// Funzione per aggiornare i dati
+// Modifica la funzione updateData per gestire meglio gli errori
 async function updateData() {
     try {
         console.log('Iniziando aggiornamento dati...');
-        const stations = await downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv');
-        const prices = await downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/prezzo_alle_8.csv');
         
-        if (stations.length > 0 && prices.length > 0) {
+        // Array di URL di backup
+        const urls = {
+            stations: [
+                'https://www.mise.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv',
+                // URL di backup se ne hai
+            ],
+            prices: [
+                'https://www.mise.gov.it/images/exportCSV/prezzo_alle_8.csv',
+                // URL di backup se ne hai
+            ]
+        };
+
+        let stations = null;
+        let prices = null;
+
+        // Prova ciascun URL fino a quando uno funziona
+        for (const stationUrl of urls.stations) {
+            try {
+                stations = await downloadAndParseCSV(stationUrl);
+                break;
+            } catch (error) {
+                console.error(`Errore con URL ${stationUrl}:`, error.message);
+            }
+        }
+
+        for (const priceUrl of urls.prices) {
+            try {
+                prices = await downloadAndParseCSV(priceUrl);
+                break;
+            } catch (error) {
+                console.error(`Errore con URL ${priceUrl}:`, error.message);
+            }
+        }
+
+        if (stations?.length > 0 && prices?.length > 0) {
             stationsData = stations.slice(1);
             pricesData = prices.slice(1);
             console.log('Dati aggiornati con successo');
         } else {
-            throw new Error('Dati vuoti ricevuti');
+            throw new Error('Impossibile ottenere i dati da tutte le fonti');
         }
     } catch (error) {
         console.error('Errore durante l\'aggiornamento dei dati:', error);
-        // Non sovrascrivere i dati esistenti in caso di errore
+        // Mantieni i dati vecchi se esistono
         if (!stationsData || !pricesData) {
             stationsData = [];
             pricesData = [];

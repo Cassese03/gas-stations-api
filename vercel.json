@@ -1,5 +1,7 @@
 {
   "version": 2,
+  "buildCommand": "node index.js",
+  "outputDirectory": ".",
   "builds": [
     {
       "src": "index.js",
