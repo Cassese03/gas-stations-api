@@ -1,8 +1,10 @@
 const express = require('express');
 const csv = require('csv-parser');
-const fetch = require('node-fetch');  // Modifica qui: rimosso l'import dinamico
+const fetch = require('node-fetch');
 const fs = require('fs');
 const { Readable } = require('stream');
+const https = require('https');
+const tunnel = require('tunnel');
 
 const app = express();
 const port = 3000;
@@ -20,19 +22,48 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
     return R * c;
 }
 
-// Funzione per scaricare e parsare i CSV
+// Configurazione dell'agente HTTPS
+const agent = new https.Agent({
+    rejectUnauthorized: false,
+    keepAlive: true,
+    timeout: 60000
+});
+
 async function downloadAndParseCSV(url) {
-    const response = await fetch(url);
-    const buffer = await response.buffer();
-    const results = [];
-    
-    return new Promise((resolve, reject) => {
-        Readable.from(buffer)
-            .pipe(csv({ separator: ';' }))
-            .on('data', (data) => results.push(data))
-            .on('end', () => resolve(results))
-            .on('error', (error) => reject(error));
-    });
+    try {
+        const response = await fetch(url, {
+            agent,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': 'text/csv,application/csv',
+                'Connection': 'keep-alive'
+            },
+            timeout: 60000,
+            compress: true
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const buffer = await response.buffer();
+        const results = [];
+        
+        return new Promise((resolve, reject) => {
+            Readable.from(buffer)
+                .pipe(csv({ 
+                    separator: ';',
+                    stripBOM: true,
+                    skip_empty_lines: true
+                }))
+                .on('data', (data) => results.push(data))
+                .on('end', () => resolve(results))
+                .on('error', (error) => reject(error));
+        });
+    } catch (error) {
+        console.error('Errore nel download:', error);
+        throw error;
+    }
 }
 
 // Cache per i dati
@@ -43,14 +74,20 @@ let pricesData = null;
 async function updateData() {
     try {
         console.log('Iniziando aggiornamento dati...');
-        try{
-            const stations = await downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv');
-            const prices = await downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/prezzo_alle_8.csv');
-        }catch(err){
-            console.log(err);    
+        let stations = null;
+        let prices = null;
+
+        try {
+            stations = await downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv');
+            console.log('Download stazioni completato');
+            prices = await downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/prezzo_alle_8.csv');
+            console.log('Download prezzi completato');
+        } catch (err) {
+            console.error('Errore nel download:', err);
+            throw err;
         }
-        
-        if (stations.length > 0 && prices.length > 0) {
+
+        if (stations?.length > 0 && prices?.length > 0) {
             stationsData = stations.slice(1);
             pricesData = prices.slice(1);
             console.log('Dati aggiornati con successo');
