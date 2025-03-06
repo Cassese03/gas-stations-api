@@ -1,6 +1,6 @@
 const express = require('express');
 const csv = require('csv-parser');
-const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+const fetch = require('node-fetch');
 const fs = require('fs');
 const { Readable } = require('stream');
 
@@ -42,26 +42,24 @@ let pricesData = null;
 // Funzione per aggiornare i dati
 async function updateData() {
     try {
+        console.log('Iniziando aggiornamento dati...');
         const stations = await downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv');
         const prices = await downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/prezzo_alle_8.csv');
         
-        // Debug log per verificare i dati
-     //  console.log('=================== DEBUG DATI ===================');
-     //  console.log('Prima stazione raw:', stations[0]);
-     //  console.log('Primo prezzo raw:', prices[0]);
-     //  console.log('Colonne stazione:', Object.keys(stations[0]));
-     //  console.log('Colonne prezzi:', Object.keys(prices[0]));
-     //  console.log('===============================================');
-     //  console.log(stations);
-     //  console.log(prices);
-     //  console.log('===============================================');
-     //  console.log('LORENZO STOP');
-     //  console.log('===============================================');
-     // 
-        stationsData = stations.slice(1);
-        pricesData = prices.slice(1);
+        if (stations.length > 0 && prices.length > 0) {
+            stationsData = stations.slice(1);
+            pricesData = prices.slice(1);
+            console.log('Dati aggiornati con successo');
+        } else {
+            throw new Error('Dati vuoti ricevuti');
+        }
     } catch (error) {
         console.error('Errore durante l\'aggiornamento dei dati:', error);
+        // Non sovrascrivere i dati esistenti in caso di errore
+        if (!stationsData || !pricesData) {
+            stationsData = [];
+            pricesData = [];
+        }
     }
 }
 
@@ -199,9 +197,8 @@ app.get('/top-stations', (req, res) => {
 });
 
 if (require.main === module) {
-    app.listen(port, () => {
-        console.log(`Server in esecuzione sulla porta ${port}`);
-        // Esegui subito l'aggiornamento dei dati all'avvio
+    const server = app.listen(process.env.PORT || port, () => {
+        console.log(`Server in esecuzione sulla porta ${process.env.PORT || port}`);
         updateData().catch(console.error);
     });
 }

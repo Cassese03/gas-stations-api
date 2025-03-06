@@ -1,6 +1,5 @@
 {
   "version": 2,
-  "outputDirectory": ".",
   "builds": [
     {
       "src": "index.js",
@@ -10,16 +9,7 @@
   "routes": [
     {
       "src": "/(.*)",
-      "dest": "index.js",
-      "headers": {
-        "cache-control": "s-maxage=0"
-      }
+      "dest": "/index.js"
     }
-  ],
-  "functions": {
-    "api/*.js": {
-      "memory": 1024,
-      "maxDuration": 60
-    }
-  }
+  ]
 }
