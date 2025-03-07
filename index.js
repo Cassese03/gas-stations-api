@@ -16,7 +16,7 @@ let cache = {
 function calculateDistance(lat1, lon1, lat2, lon2) {
     const R = 6371; // Raggio della Terra in km
     const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lon1 - lon2) * Math.PI / 180;
+    const dLon = (lon1 - lon1) * Math.PI / 180;
     const a = 
         Math.sin(dLat/2) * Math.sin(dLat/2) +
         Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
@@ -111,19 +111,19 @@ app.get('/gas-stations', async (req, res) => {
 
     // Filtra le stazioni per distanza e aggiungi i prezzi
     let nearbyStations = cache.stationsData
-        .filter(station => {
-            // Usa i nomi corretti dei campi per le coordinate
+        .map(station => {
             const stationLat = parseFloat(station['_8']);
             const stationLng = parseFloat(station['_9']);
             
             if (isNaN(stationLat) || isNaN(stationLng)) {
-                return false;
+                return null;
             }
 
             const dist = calculateDistance(userLat, userLng, stationLat, stationLng);
-            return dist <= maxDistance;
-        })
-        .map(station => {
+            if (dist > maxDistance) {
+                return null;
+            }
+
             const stationId = station['_0'];
             const stationPrices = cache.pricesData.filter(p => p['_0'] === stationId);
 
@@ -141,9 +141,10 @@ app.get('/gas-stations', async (req, res) => {
                     provincia: station['_7']
                 },
                 maps: {
-                    lat: parseFloat(station['_8']),
-                    lon: parseFloat(station['_9'])
+                    lat: stationLat,
+                    lon: stationLng
                 },
+                distanza: Number(dist.toFixed(2)), // Aggiunge la distanza arrotondata a 2 decimali
                 prezzi_carburanti: stationPrices.map(price => ({
                     tipo: price['_1'],
                     prezzo: parseFloat(price['_2']?.replace(',', '.')) || null,
@@ -151,7 +152,10 @@ app.get('/gas-stations', async (req, res) => {
                     ultimo_aggiornamento: price['_4']
                 }))
             };
-        });
+        })
+        .filter(station => station !== null) // Rimuove le stazioni nulle
+        .sort((a, b) => a.distanza - b.distanza) // Ordina per distanza
+        .slice(0, 10); // Prende solo le prime 10 stazioni più vicine
 
     res.json({
         status: 'success',
