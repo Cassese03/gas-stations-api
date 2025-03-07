@@ -36,9 +36,20 @@ async function downloadAndParseCSV(url) {
 
         return new Promise((resolve, reject) => {
             const results = [];
+            let isFirstRow = true;
+            
             Readable.from(response.body)
-                .pipe(csv({ separator: ';' }))
-                .on('data', (data) => results.push(data))
+                .pipe(csv({ 
+                    separator: ';',
+                    mapHeaders: ({ header, index }) => `_${index}` // Questo trasforma gli header in _0, _1, _2, ecc.
+                }))
+                .on('data', (data) => {
+                    if (!isFirstRow) {
+                        results.push(data);
+                    } else {
+                        isFirstRow = false;
+                    }
+                })
                 .on('end', () => resolve(results))
                 .on('error', (error) => reject(error));
         });
@@ -113,8 +124,8 @@ app.get('/gas-stations', async (req, res) => {
             return dist <= maxDistance;
         })
         .map(station => {
-            const stationId = station['Estrazione del 2025-03-05'];
-            const stationPrices = cache.pricesData.filter(p => p['Estrazione del 2025-03-05'] === stationId);
+            const stationId = station['_0'];
+            const stationPrices = cache.pricesData.filter(p => p['_0'] === stationId);
 
             return {
                 id_stazione: stationId,
@@ -165,9 +176,9 @@ app.get('/top-stations', async (req, res) => {
         .slice(0, 10)
         .map(station => {
             // Usa il campo ID corretto
-            const stationId = station['Estrazione del 2025-03-05'] || station['Estrazione del 2025-03-05'];
+            const stationId = station['_0'] || station['_0'];
             // Trova i prezzi usando l'ID corretto
-            const stationPrices = cache.pricesData.filter(p => p['Estrazione del 2025-03-05'] === stationId);
+            const stationPrices = cache.pricesData.filter(p => p['_0'] === stationId);
             return {
                 id_stazione: stationId,
                 bandiera: station['_2'],
