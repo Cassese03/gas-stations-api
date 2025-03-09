@@ -156,7 +156,7 @@ app.get('/gas-stations', async (req, res) => {
         })
         .sort((a, b) => a.distanza - b.distanza)
         .slice(0, 10); // Limita a 10 risultati
-
+//test
     res.json({
         status: 'success',
         timestamp: new Date().toISOString(),
