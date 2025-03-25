@@ -224,25 +224,43 @@ app.get('/top-stations', async (req, res) => {
     });
 });
 
-// Endpoint di health check
-app.get('/health', (req, res) => {
-    console.log('Health check eseguito:', new Date().toISOString());
+// Endpoint di health check con aggiornamento dati
+app.get('/health', async (req, res) => {
+    console.log('Health check iniziato:', new Date().toISOString());
     
-    const healthStatus = {
-        status: 'online',
-        timestamp: new Date().toISOString(),
-        cache: {
-            lastUpdate: cache.lastUpdate,
-            stationsCount: cache.stationsData?.length || 0,
-            pricesCount: cache.pricesData?.length || 0,
-            hasData: !!cache.stationsData && !!cache.pricesData
-        },
-        uptime: process.uptime(),
-        memory: process.memoryUsage(),
-        environment: process.env.NODE_ENV || 'development'
-    };
+    try {
+        // Esegui l'aggiornamento dei dati
+        await updateDataIfNeeded();
+        
+        const healthStatus = {
+            status: 'online',
+            timestamp: new Date().toISOString(),
+            cache: {
+                lastUpdate: cache.lastUpdate,
+                stationsCount: cache.stationsData?.length || 0,
+                pricesCount: cache.pricesData?.length || 0,
+                hasData: !!cache.stationsData && !!cache.pricesData,
+                lastUpdateFormatted: cache.lastUpdate ? new Date(cache.lastUpdate).toISOString() : null
+            },
+            uptime: process.uptime(),
+            memory: process.memoryUsage(),
+            environment: process.env.NODE_ENV || 'development',
+            dataUpdateStatus: 'success'
+        };
 
-    res.json(healthStatus);
+        res.json(healthStatus);
+    } catch (error) {
+        console.error('Health check error:', error);
+        res.status(500).json({
+            status: 'error',
+            timestamp: new Date().toISOString(),
+            error: error.message,
+            cache: {
+                lastUpdate: cache.lastUpdate,
+                hasData: !!cache.stationsData && !!cache.pricesData
+            }
+        });
+    }
 });
 
 // Configurazione della porta
