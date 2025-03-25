@@ -11,7 +11,7 @@ let cache = {
   pricesData: null,
   lastUpdate: null
 };
-
+await updateDataIfNeeded();
 // Funzione per calcolare la distanza tra due punti usando la formula di Haversine
 function calculateDistance(lat1, lon1, lat2, lon2) {
     const R = 6371; // Raggio della Terra in km
@@ -60,7 +60,7 @@ async function downloadAndParseCSV(url) {
 }
 
 async function updateDataIfNeeded() {
-    // Aggiorna i dati solo se sono passate più di 2 ore dall'ultimo aggiornamento
+    // Aggiorna i dati solo se sono passate più di 12 ore dall'ultimo aggiornamento
     const TWO_HOURS = 12 * 60 * 60 * 1000;
     
     if (!cache.lastUpdate || (Date.now() - cache.lastUpdate) > TWO_HOURS) {
