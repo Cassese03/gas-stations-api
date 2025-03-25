@@ -221,7 +221,31 @@ app.get('/top-stations', async (req, res) => {
        // }
     });
 });
+// Configurazione dell'aggiornamento automatico
+const TWO_HOURS = 2 * 60 * 60 * 1000;
 
+// Modifica la funzione startAutoUpdate per restituire una Promise
+async function startAutoUpdate() {
+    try {
+        // Caricamento iniziale dei dati
+        await updateDataIfNeeded();
+        console.log('Dati iniziali caricati con successo');
+
+        // Imposta l'intervallo per gli aggiornamenti successivi
+        setInterval(async () => {
+            try {
+                await updateDataIfNeeded();
+                console.log('Aggiornamento automatico completato');
+            } catch (error) {
+                console.error('Errore nell\'aggiornamento automatico:', error);
+            }
+        }, TWO_HOURS);
+
+    } catch (error) {
+        console.error('Errore nel caricamento iniziale:', error);
+        throw error; // Rilanciamo l'errore per gestirlo nell'avvio del server
+    }
+}
 // Configurazione della porta
 const PORT = process.env.PORT || 3000;
 
@@ -231,5 +255,6 @@ if (require.main === module) {
         console.log(`Server is running on port ${PORT}`);
     });
 }
+app.startAutoUpdate();
 
 module.exports = app;
