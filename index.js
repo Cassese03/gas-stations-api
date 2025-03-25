@@ -87,7 +87,6 @@ async function updateDataIfNeeded() {
 // Modifica i route handler per usare la cache
 app.get('/gas-stations', async (req, res) => {
 
-    console.log(`Request received on port ${PORT}`);
     const { lat, lng, distance } = req.query;
     
     if (!lat || !lng || !distance) {
@@ -245,27 +244,37 @@ async function startAutoUpdate() {
         throw error; // Rilanciamo l'errore per gestirlo nell'avvio del server
     }
 }
-startAutoUpdate()
-.then(() => {
-    console.log(`Sto aggiornando ${PORT}`);            
-})
-.catch(error => {
-    console.error('Failed to start server:', error);
-    process.exit(1);
-});
-// Configurazione della porta
-const PORT = process.env.PORT || 3000;
 
-// Avvio del server
-if (require.main === module) {
-    app.listen(PORT, () => {
-        console.log(`Server in ascolto sulla porta ${PORT}`);
-        startAutoUpdate().catch(error => {
-            console.error('Errore durante l\'avvio del server:', error);
-            process.exit(1);
+// Aggiungi un endpoint di warmup che forza l'aggiornamento dei dati
+app.get('/api/warmup', async (req, res) => {
+    try {
+        await updateDataIfNeeded();
+        res.json({ 
+            status: 'success', 
+            message: 'Dati aggiornati con successo',
+            lastUpdate: cache.lastUpdate,
+            hasData: {
+                stations: cache.stationsData?.length || 0,
+                prices: cache.pricesData?.length || 0
+            }
         });
-    });
-   
-}
+    } catch (error) {
+        res.status(500).json({ 
+            status: 'error', 
+            message: error.message 
+        });
+    }
+});
+
+// Avvia l'autoupdate immediatamente (importante per Vercel)
+startAutoUpdate().catch(error => {
+    console.error('Errore nell\'avvio dell\'autoupdate:', error);
+});
+
+// Rimuovi la parte condizionale dell'avvio del server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`Server in ascolto sulla porta ${PORT}`);
+});
 
 module.exports = app;
