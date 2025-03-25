@@ -87,6 +87,8 @@ async function updateDataIfNeeded() {
 
 // Modifica i route handler per usare la cache
 app.get('/gas-stations', async (req, res) => {
+
+    console.log(`Request received on port ${PORT}`);
     const { lat, lng, distance } = req.query;
     
     if (!lat || !lng || !distance) {
@@ -221,7 +223,7 @@ app.get('/top-stations', async (req, res) => {
 });
 
 // Configurazione della porta
-const PORT = 443;
+const PORT = process.env.PORT || 3000;
 
 // Avvio del server
 if (require.main === module) {
