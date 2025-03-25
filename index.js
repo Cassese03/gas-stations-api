@@ -221,7 +221,7 @@ app.get('/top-stations', async (req, res) => {
 });
 
 // Configurazione della porta
-const PORT = process.env.PORT || 3000;
+const PORT = 443;
 
 // Avvio del server
 if (require.main === module) {
