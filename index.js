@@ -2,10 +2,8 @@ const express = require('express');
 const csv = require('csv-parser');
 const fetch = require('node-fetch');
 const { Readable } = require('stream');
-const cors = require('cors');
 
 const app = express();
-app.use(cors());
 
 // Cache per i dati con timestamp
 let cache = {
@@ -18,7 +16,7 @@ let cache = {
 function calculateDistance(lat1, lon1, lat2, lon2) {
     const R = 6371; // Raggio della Terra in km
     const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lat2 - lon1) * Math.PI / 180; // Corretto qui: era (lon1 - lon1)
+    const dLon = (lon2 - lon1) * Math.PI / 180; // Corretto qui: era (lon1 - lon1)
     const a = 
         Math.sin(dLat/2) * Math.sin(dLat/2) +
         Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
@@ -222,17 +220,14 @@ app.get('/top-stations', async (req, res) => {
     });
 });
 
-// Configurazione dell'aggiornamento automatico
-const TWO_HOURS = 2 * 60 * 60 * 1000;
+// Configurazione della porta
+const PORT = process.env.PORT || 3000;
 
-// Endpoint di warmup per Vercel
-app.get('/api/warmup', async (req, res) => {
-    try {
-        await updateDataIfNeeded();
-        res.json({ status: 'success', message: 'Dati caricati con successo' });
-    } catch (error) {
-        res.status(500).json({ status: 'error', message: error.message });
-    }
-});
+// Avvio del server
+if (require.main === module) {
+    app.listen(PORT, () => {
+        console.log(`Server is running on port ${PORT}`);
+    });
+}
 
 module.exports = app;
