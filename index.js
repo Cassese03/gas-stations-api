@@ -251,6 +251,7 @@ const PORT = process.env.PORT || 3000;
 
 // Avvio del server
 if (require.main === module) {
+    console.log('Starting server...');
     startAutoUpdate()
         .then(() => {
             app.listen(PORT, () => {
