@@ -223,32 +223,41 @@ app.get('/top-stations', async (req, res) => {
 // Configurazione dell'aggiornamento automatico
 const TWO_HOURS = 2 * 60 * 60 * 1000;
 
-// Funzione per avviare gli aggiornamenti automatici
-function startAutoUpdate() {
-    // Prima chiamata all'avvio
-    updateDataIfNeeded().then(() => {
-        console.log('Dati iniziali caricati');
-    }).catch(error => {
-        console.error('Errore nel caricamento iniziale:', error);
-    });
+// Modifica la funzione startAutoUpdate per restituire una Promise
+async function startAutoUpdate() {
+    try {
+        // Caricamento iniziale dei dati
+        await updateDataIfNeeded();
+        console.log('Dati iniziali caricati con successo');
 
-    // Imposta l'intervallo per gli aggiornamenti successivi
-    setInterval(async () => {
-        try {
-            await updateDataIfNeeded();
-            console.log('Aggiornamento automatico completato');
-        } catch (error) {
-            console.error('Errore nell\'aggiornamento automatico:', error);
-        }
-    }, TWO_HOURS);
+        // Imposta l'intervallo per gli aggiornamenti successivi
+        setInterval(async () => {
+            try {
+                await updateDataIfNeeded();
+                console.log('Aggiornamento automatico completato');
+            } catch (error) {
+                console.error('Errore nell\'aggiornamento automatico:', error);
+            }
+        }, TWO_HOURS);
+
+    } catch (error) {
+        console.error('Errore nel caricamento iniziale:', error);
+        throw error; // Rilanciamo l'errore per gestirlo nell'avvio del server
+    }
 }
 
-// Avvio del server e degli aggiornamenti automatici
+// Modifica l'avvio del server per attendere il caricamento dei dati
 if (require.main === module) {
-    startAutoUpdate(); // Avvia gli aggiornamenti automatici
-    app.listen(PORT, () => {
-        console.log(`Server is running on port ${PORT}`);
-    });
+    startAutoUpdate()
+        .then(() => {
+            app.listen(PORT, () => {
+                console.log(`Server is running on port ${PORT}`);
+            });
+        })
+        .catch(error => {
+            console.error('Errore fatale durante l\'avvio:', error);
+            process.exit(1);
+        });
 }
 
 module.exports = app;
