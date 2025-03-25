@@ -11,7 +11,7 @@ let cache = {
   pricesData: null,
   lastUpdate: null
 };
-await updateDataIfNeeded();
+
 // Funzione per calcolare la distanza tra due punti usando la formula di Haversine
 function calculateDistance(lat1, lon1, lat2, lon2) {
     const R = 6371; // Raggio della Terra in km
@@ -84,6 +84,26 @@ async function updateDataIfNeeded() {
         }
     }
 }
+
+// Inizializzazione immediata dei dati
+(async function initializeData() {
+    try {
+        await updateDataIfNeeded();
+        console.log('Inizializzazione dati completata');
+        
+        // Imposta l'aggiornamento automatico ogni 12 ore
+        setInterval(async () => {
+            try {
+                await updateDataIfNeeded();
+                console.log('Aggiornamento automatico completato');
+            } catch (error) {
+                console.error('Errore aggiornamento automatico:', error);
+            }
+        }, 12 * 60 * 60 * 1000);
+    } catch (error) {
+        console.error('Errore inizializzazione:', error);
+    }
+})();
 
 // Modifica i route handler per usare la cache
 app.get('/gas-stations', async (req, res) => {
