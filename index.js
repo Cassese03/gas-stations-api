@@ -60,7 +60,7 @@ async function downloadAndParseCSV(url) {
 }
 
 async function updateDataIfNeeded() {
-    // Aggiorna i dati solo se sono passate più di 12 ore dall'ultimo aggiornamento
+    // Aggiorna i dati solo se sono passate più di 2 ore dall'ultimo aggiornamento
     const TWO_HOURS = 12 * 60 * 60 * 1000;
     
     if (!cache.lastUpdate || (Date.now() - cache.lastUpdate) > TWO_HOURS) {
@@ -222,6 +222,27 @@ app.get('/top-stations', async (req, res) => {
        //     esempio_prezzo: cache.pricesData[0]
        // }
     });
+});
+
+// Endpoint di health check
+app.get('/health', (req, res) => {
+    console.log('Health check eseguito:', new Date().toISOString());
+    
+    const healthStatus = {
+        status: 'online',
+        timestamp: new Date().toISOString(),
+        cache: {
+            lastUpdate: cache.lastUpdate,
+            stationsCount: cache.stationsData?.length || 0,
+            pricesCount: cache.pricesData?.length || 0,
+            hasData: !!cache.stationsData && !!cache.pricesData
+        },
+        uptime: process.uptime(),
+        memory: process.memoryUsage(),
+        environment: process.env.NODE_ENV || 'development'
+    };
+
+    res.json(healthStatus);
 });
 
 // Configurazione della porta
