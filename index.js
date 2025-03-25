@@ -2,8 +2,10 @@ const express = require('express');
 const csv = require('csv-parser');
 const fetch = require('node-fetch');
 const { Readable } = require('stream');
+const cors = require('cors');
 
 const app = express();
+app.use(cors());
 
 // Cache per i dati con timestamp
 let cache = {
@@ -223,32 +225,14 @@ app.get('/top-stations', async (req, res) => {
 // Configurazione dell'aggiornamento automatico
 const TWO_HOURS = 2 * 60 * 60 * 1000;
 
-// Esegui startAutoUpdate immediatamente
-(async () => {
+// Endpoint di warmup per Vercel
+app.get('/api/warmup', async (req, res) => {
     try {
         await updateDataIfNeeded();
-        console.log('Dati iniziali caricati con successo');
-        
-        // Imposta l'intervallo per gli aggiornamenti successivi
-        setInterval(async () => {
-            try {
-                await updateDataIfNeeded();
-                console.log('Aggiornamento automatico completato');
-            } catch (error) {
-                console.error('Errore nell\'aggiornamento automatico:', error);
-            }
-        }, TWO_HOURS);
-
+        res.json({ status: 'success', message: 'Dati caricati con successo' });
     } catch (error) {
-        console.error('Errore nel caricamento iniziale:', error);
+        res.status(500).json({ status: 'error', message: error.message });
     }
-})();
-
-// Solo per l'avvio locale
-if (require.main === module) {
-    app.listen(PORT, () => {
-        console.log(`Server is running on port ${PORT}`);
-    });
-}
+});
 
 module.exports = app;
