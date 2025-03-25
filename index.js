@@ -85,26 +85,6 @@ async function updateDataIfNeeded() {
     }
 }
 
-// Inizializzazione immediata dei dati
-(async function initializeData() {
-    try {
-        await updateDataIfNeeded();
-        console.log('Inizializzazione dati completata');
-        
-        // Imposta l'aggiornamento automatico ogni 12 ore
-        setInterval(async () => {
-            try {
-                await updateDataIfNeeded();
-                console.log('Aggiornamento automatico completato');
-            } catch (error) {
-                console.error('Errore aggiornamento automatico:', error);
-            }
-        }, 12 * 60 * 60 * 1000);
-    } catch (error) {
-        console.error('Errore inizializzazione:', error);
-    }
-})();
-
 // Modifica i route handler per usare la cache
 app.get('/gas-stations', async (req, res) => {
     await updateDataIfNeeded();
