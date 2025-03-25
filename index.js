@@ -3,10 +3,17 @@ const csv = require('csv-parser');
 const fetch = require('node-fetch');
 const { Readable } = require('stream');
 
-console.log('Starting server...');
 const app = express();
 
-console.log('Starting serv2er...');
+startAutoUpdate()
+.then(() => {
+    console.log(`Sto aggiornando ${PORT}`);            
+})
+.catch(error => {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+});
+
 // Cache per i dati con timestamp
 let cache = {
   stationsData: null,
@@ -254,13 +261,9 @@ const PORT = process.env.PORT || 3000;
 // Avvio del server
 if (require.main === module) {
     app.listen(PORT, () => {
-        console.error('Lorenzo');
-        startAutoUpdate()
-        .then(() => {
-            console.log(`Server in ascolto sulla porta ${PORT}`);            
-        })
-        .catch(error => {
-            console.error('Failed to start server:', error);
+        console.log(`Server in ascolto sulla porta ${PORT}`);
+        startAutoUpdate().catch(error => {
+            console.error('Errore durante l\'avvio del server:', error);
             process.exit(1);
         });
     });
