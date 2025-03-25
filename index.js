@@ -251,6 +251,8 @@ async function startAutoUpdate() {
 // Configurazione della porta
 const PORT = process.env.PORT || 3000;
 
+module.exports = app;
+
 // Avvio del server
 if (require.main === module) {
     app.listen(PORT, () => {
@@ -266,5 +268,3 @@ if (require.main === module) {
     });
    
 }
-
-module.exports = app;
