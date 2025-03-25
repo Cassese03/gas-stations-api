@@ -2,7 +2,7 @@
   "version": 2,
   "builds": [
     {
-      "src": "index.js",
+      "src": "api/**/*.js",
       "use": "@vercel/node"
     }
   ],
@@ -14,8 +14,8 @@
   ],
   "crons": [
     {
-      "path": "/api/cron",
-      "schedule": "*/30 * * * *"
+      "path": "api/cron.js",
+      "schedule": "*/1 * * * *"
     }
   ]
 }
