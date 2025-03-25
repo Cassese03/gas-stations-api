@@ -4,6 +4,7 @@ const fetch = require('node-fetch');
 const { Readable } = require('stream');
 
 const app = express();
+
 // Cache per i dati con timestamp
 let cache = {
   stationsData: null,
@@ -60,7 +61,7 @@ async function downloadAndParseCSV(url) {
 
 async function updateDataIfNeeded() {
     // Aggiorna i dati solo se sono passate più di 2 ore dall'ultimo aggiornamento
-    const TWO_HOURS = 2 * 60 * 60 * 1000;
+    const TWO_HOURS = 12 * 60 * 60 * 1000;
     
     if (!cache.lastUpdate || (Date.now() - cache.lastUpdate) > TWO_HOURS) {
         try {
@@ -86,7 +87,8 @@ async function updateDataIfNeeded() {
 
 // Modifica i route handler per usare la cache
 app.get('/gas-stations', async (req, res) => {
-
+    await updateDataIfNeeded();
+    
     const { lat, lng, distance } = req.query;
     
     if (!lat || !lng || !distance) {
@@ -165,6 +167,8 @@ app.get('/gas-stations', async (req, res) => {
 });
 
 app.get('/top-stations', async (req, res) => {
+    await updateDataIfNeeded();
+    
     if (!cache.stationsData || !cache.pricesData) {
         return res.status(503).json({ status: 'error', message: 'Dati non disponibili' });
     }
@@ -219,62 +223,15 @@ app.get('/top-stations', async (req, res) => {
        // }
     });
 });
-// Configurazione dell'aggiornamento automatico
-const TWO_HOURS = 2 * 60 * 60 * 1000;
 
-// Modifica la funzione startAutoUpdate per restituire una Promise
-async function startAutoUpdate() {
-    try {
-        // Caricamento iniziale dei dati
-        await updateDataIfNeeded();
-        console.log('Dati iniziali caricati con successo');
-
-        // Imposta l'intervallo per gli aggiornamenti successivi
-        setInterval(async () => {
-            try {
-                await updateDataIfNeeded();
-                console.log('Aggiornamento automatico completato');
-            } catch (error) {
-                console.error('Errore nell\'aggiornamento automatico:', error);
-            }
-        }, TWO_HOURS);
-
-    } catch (error) {
-        console.error('Errore nel caricamento iniziale:', error);
-        throw error; // Rilanciamo l'errore per gestirlo nell'avvio del server
-    }
-}
-
-// Aggiungi un endpoint di warmup che forza l'aggiornamento dei dati
-app.get('/api/warmup', async (req, res) => {
-    try {
-        await updateDataIfNeeded();
-        res.json({ 
-            status: 'success', 
-            message: 'Dati aggiornati con successo',
-            lastUpdate: cache.lastUpdate,
-            hasData: {
-                stations: cache.stationsData?.length || 0,
-                prices: cache.pricesData?.length || 0
-            }
-        });
-    } catch (error) {
-        res.status(500).json({ 
-            status: 'error', 
-            message: error.message 
-        });
-    }
-});
-
-// Avvia l'autoupdate immediatamente (importante per Vercel)
-startAutoUpdate().catch(error => {
-    console.error('Errore nell\'avvio dell\'autoupdate:', error);
-});
-
-// Rimuovi la parte condizionale dell'avvio del server
+// Configurazione della porta
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`Server in ascolto sulla porta ${PORT}`);
-});
+
+// Avvio del server
+if (require.main === module) {
+    app.listen(PORT, () => {
+        console.log(`Server is running on port ${PORT}`);
+    });
+}
 
 module.exports = app;
