@@ -87,8 +87,6 @@ async function updateDataIfNeeded() {
 
 // Modifica i route handler per usare la cache
 app.get('/gas-stations', async (req, res) => {
-    await updateDataIfNeeded();
-    
     const { lat, lng, distance } = req.query;
     
     if (!lat || !lng || !distance) {
@@ -167,8 +165,6 @@ app.get('/gas-stations', async (req, res) => {
 });
 
 app.get('/top-stations', async (req, res) => {
-    await updateDataIfNeeded();
-    
     if (!cache.stationsData || !cache.pricesData) {
         return res.status(503).json({ status: 'error', message: 'Dati non disponibili' });
     }
@@ -224,11 +220,32 @@ app.get('/top-stations', async (req, res) => {
     });
 });
 
-// Configurazione della porta
-const PORT = process.env.PORT || 3000;
+// Configurazione dell'aggiornamento automatico
+const TWO_HOURS = 2 * 60 * 60 * 1000;
 
-// Avvio del server
+// Funzione per avviare gli aggiornamenti automatici
+function startAutoUpdate() {
+    // Prima chiamata all'avvio
+    updateDataIfNeeded().then(() => {
+        console.log('Dati iniziali caricati');
+    }).catch(error => {
+        console.error('Errore nel caricamento iniziale:', error);
+    });
+
+    // Imposta l'intervallo per gli aggiornamenti successivi
+    setInterval(async () => {
+        try {
+            await updateDataIfNeeded();
+            console.log('Aggiornamento automatico completato');
+        } catch (error) {
+            console.error('Errore nell\'aggiornamento automatico:', error);
+        }
+    }, TWO_HOURS);
+}
+
+// Avvio del server e degli aggiornamenti automatici
 if (require.main === module) {
+    startAutoUpdate(); // Avvia gli aggiornamenti automatici
     app.listen(PORT, () => {
         console.log(`Server is running on port ${PORT}`);
     });
