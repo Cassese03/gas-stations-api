@@ -16,7 +16,7 @@ let cache = {
 function calculateDistance(lat1, lon1, lat2, lon2) {
     const R = 6371; // Raggio della Terra in km
     const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lon2 - lon1) * Math.PI / 180; // Corretto qui: era (lon1 - lon1)
+    const dLon = (lat2 - lon1) * Math.PI / 180; // Corretto qui: era (lon1 - lon1)
     const a = 
         Math.sin(dLat/2) * Math.sin(dLat/2) +
         Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
@@ -223,13 +223,12 @@ app.get('/top-stations', async (req, res) => {
 // Configurazione dell'aggiornamento automatico
 const TWO_HOURS = 2 * 60 * 60 * 1000;
 
-// Modifica la funzione startAutoUpdate per restituire una Promise
-async function startAutoUpdate() {
+// Esegui startAutoUpdate immediatamente
+(async () => {
     try {
-        // Caricamento iniziale dei dati
         await updateDataIfNeeded();
         console.log('Dati iniziali caricati con successo');
-
+        
         // Imposta l'intervallo per gli aggiornamenti successivi
         setInterval(async () => {
             try {
@@ -242,22 +241,14 @@ async function startAutoUpdate() {
 
     } catch (error) {
         console.error('Errore nel caricamento iniziale:', error);
-        throw error; // Rilanciamo l'errore per gestirlo nell'avvio del server
     }
-}
+})();
 
-// Modifica l'avvio del server per attendere il caricamento dei dati
+// Solo per l'avvio locale
 if (require.main === module) {
-    startAutoUpdate()
-        .then(() => {
-            app.listen(PORT, () => {
-                console.log(`Server is running on port ${PORT}`);
-            });
-        })
-        .catch(error => {
-            console.error('Errore fatale durante l\'avvio:', error);
-            process.exit(1);
-        });
+    app.listen(PORT, () => {
+        console.log(`Server is running on port ${PORT}`);
+    });
 }
 
 module.exports = app;
