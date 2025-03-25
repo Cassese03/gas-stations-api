@@ -4,16 +4,6 @@ const fetch = require('node-fetch');
 const { Readable } = require('stream');
 
 const app = express();
-
-startAutoUpdate()
-.then(() => {
-    console.log(`Sto aggiornando ${PORT}`);            
-})
-.catch(error => {
-    console.error('Failed to start server:', error);
-    process.exit(1);
-});
-
 // Cache per i dati con timestamp
 let cache = {
   stationsData: null,
@@ -255,6 +245,14 @@ async function startAutoUpdate() {
         throw error; // Rilanciamo l'errore per gestirlo nell'avvio del server
     }
 }
+startAutoUpdate()
+.then(() => {
+    console.log(`Sto aggiornando ${PORT}`);            
+})
+.catch(error => {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+});
 // Configurazione della porta
 const PORT = process.env.PORT || 3000;
 
