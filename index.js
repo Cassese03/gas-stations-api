@@ -6,15 +6,23 @@ const cors = require('cors');
 
 const app = express();
 
-// Configura CORS
-app.use(cors({
-    origin: '*',
-    methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
-    credentials: true,
-    preflightContinue: false,
-    optionsSuccessStatus: 204
-}));
+// Rimuovi la configurazione CORS esistente e sostituiscila con questa
+app.use(cors());
+
+// Aggiungi middleware per headers CORS su tutte le risposte
+app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, PATCH, DELETE');
+    res.header('Access-Control-Allow-Headers', '*');
+    res.header('Access-Control-Allow-Credentials', true);
+    
+    // Gestisci le richieste OPTIONS
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
+    
+    next();
+});
 
 // Cache per i dati con timestamp
 let cache = {
