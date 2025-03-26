@@ -171,9 +171,11 @@ app.get('/api/cron', async (req, res) => {
         await updateDataIfNeeded();
     } catch (error) {
         console.error('Error in cron job:', error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+
+        res.json({ status: 'failed', timestamp: new Date().toISOString() });
     }
-  return NextResponse.json({ succes:true }, { status: 200 });
+    res.json({ status: 'success', timestamp: new Date().toISOString() });
+
 });
 
 app.get('/top-stations', async (req, res) => {
