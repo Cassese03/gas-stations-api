@@ -2,22 +2,20 @@ const express = require('express');
 const csv = require('csv-parser');
 const fetch = require('node-fetch');
 const { Readable } = require('stream');
+const cors = require('cors');
 
 const app = express();
 
-// Aggiungi middleware per CORS
-app.use((req, res, next) => {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
-    
-    // Gestisci le richieste OPTIONS per il preflight
-    if (req.method === 'OPTIONS') {
-        return res.status(200).end();
-    }
-    
-    next();
-});
+// Configura CORS
+app.use(cors({
+    origin: '*',
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+    credentials: true,
+    preflightContinue: false,
+    optionsSuccessStatus: 204
+}));
+
 // Cache per i dati con timestamp
 let cache = {
   stationsData: null,
