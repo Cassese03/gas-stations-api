@@ -166,6 +166,16 @@ app.get('/gas-stations', async (req, res) => {
     });
 });
 
+app.get('/api/cron', async (req, res) => {
+    try {
+        await updateDataIfNeeded();
+    } catch (error) {
+        console.error('Error in cron job:', error);
+        return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+  return NextResponse.json({ succes:true }, { status: 200 });
+});
+
 app.get('/top-stations', async (req, res) => {
     await updateDataIfNeeded();
     
