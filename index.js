@@ -5,6 +5,19 @@ const { Readable } = require('stream');
 
 const app = express();
 
+// Aggiungi middleware per CORS
+app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+    
+    // Gestisci le richieste OPTIONS per il preflight
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
+    
+    next();
+});
 // Cache per i dati con timestamp
 let cache = {
   stationsData: null,
