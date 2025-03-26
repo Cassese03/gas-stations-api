@@ -235,7 +235,7 @@ app.get('/top-stations', async (req, res) => {
        // }
     });
 });
-
+// dovrebbe gia funzionare
 // Endpoint di health check con aggiornamento dati
 app.get('/health', async (req, res) => {
     console.log('Health check iniziato:', new Date().toISOString());
