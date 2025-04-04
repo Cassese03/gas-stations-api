@@ -79,8 +79,8 @@ async function downloadAndParseCSV(url) {
 }
 
 async function updateDataIfNeeded() {
-    // Aggiorna i dati solo se sono passate più di 2 ore dall'ultimo aggiornamento
-    const TWO_HOURS = 12 * 60 * 60 * 1000;
+    // Aggiorna i dati solo se sono passate più di 23 ore dall'ultimo aggiornamento
+    const TWO_HOURS = 23 * 60 * 60 * 1000;
     
     if (!cache.lastUpdate || (Date.now() - cache.lastUpdate) > TWO_HOURS) {
         try {
