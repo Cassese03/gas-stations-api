@@ -353,112 +353,100 @@ app.get('/health', async (req, res) => {
 
 // Endpoint per le stazioni di ricarica elettrica
 app.get('/charge-stations', async (req, res) => {
-    try {
-        // Aggiorna la cache se necessario
-        await updateDataIfNeeded();
-        
-        const { lat, lng, distance } = req.query;
-        
-        if (!lat || !lng || !distance) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'Parametri lat, lng e distance sono richiesti'
-            });
-        }
-        
-        if (!cache.chargeStationsData) {
-            return res.status(503).json({
-                status: 'error',
-                message: 'Dati non ancora disponibili'
-            });
-        }
-
-        const userLat = parseFloat(lat);
-        const userLng = parseFloat(lng);
-        const maxDistance = parseFloat(distance);
-        
-        // Filtra le stazioni di ricarica e calcola la distanza
-        const nearbyStations = cache.chargeStationsData
-            .filter(station => {
-                if (!station.AddressInfo || !station.AddressInfo.Latitude || !station.AddressInfo.Longitude) {
-                    return false;
-                }
-                
-                const stationLat = station.AddressInfo.Latitude;
-                const stationLng = station.AddressInfo.Longitude;
-                const dist = calculateDistance(userLat, userLng, stationLat, stationLng);
-                station._distance = dist;
-                return dist <= maxDistance;
-            })
-            .map(station => {
-                // Calcola il "prezzo" medio basato sulla potenza
-                const avgPower = station.Connections.reduce((sum, conn) => sum + (conn.PowerKW || 0), 0) / 
-                                (station.Connections.length || 1);
-                
-                // Aggiungi il numero di colonnine disponibili
-                const numBays = station.NumberOfPoints || station.Connections.length || 1;
-                
-                return {
-                    id_stazione: station.ID.toString(), // L'ID ha già il prefisso "999"
-                    bandiera: (station.OperatorInfo?.Title || "Generico") + ` x${numBays}`,
-                    dettagli_stazione: {
-                        gestore: station.OperatorInfo?.Title || "N/D",
-                        tipo: "Elettrica",
-                        nome: (station.AddressInfo.Title || "Stazione di ricarica") + ` (${numBays} colonnine)`
-                    },
-                    indirizzo: {
-                        via: station.AddressInfo.AddressLine1 || "N/D",
-                        comune: station.AddressInfo.Town || "N/D",
-                        provincia: station.AddressInfo.StateOrProvince || "N/D"
-                    },
-                    maps: {
-                        lat: station.AddressInfo.Latitude,
-                        lon: station.AddressInfo.Longitude
-                    },
-                    distanza: parseFloat(station._distance.toFixed(2)),
-                    numero_colonnine: numBays, // Aggiungiamo un campo dedicato
-                    prezzi_carburanti: station.Connections.map(conn => {
-                        const potenzaKW = conn.PowerKW || avgPower || 0;
-                        let stimaPrezzo = null;
-                        
-                        if (potenzaKW > 0) {
-                            // Stima basata su tariffe medie in Italia
-                            if (potenzaKW < 11) stimaPrezzo = 0.40; // AC lenta
-                            else if (potenzaKW < 50) stimaPrezzo = 0.50; // AC veloce
-                            else if (potenzaKW < 100) stimaPrezzo = 0.60; // DC veloce
-                            else stimaPrezzo = 0.70; // DC ultra veloce
-                        }
-                        
-                        return {
-                            tipo: conn.ConnectionType?.Title || "Generico",
-                            potenza_kw: parseFloat(potenzaKW.toFixed(2)),
-                            prezzo: stimaPrezzo, // €/kWh stimato
-                            unita_misura: "€/kWh (stimato)",
-                            self_service: true,
-                            ultimo_aggiornamento: station.DateLastStatusUpdate ? 
-                                new Date(station.DateLastStatusUpdate).toISOString().split('T')[0] : 
-                                new Date().toISOString().split('T')[0]
-                        };
-                    })
-                };
-            })
-            .sort((a, b) => a.distanza - b.distanza);
-
-        res.json({
-            status: 'success',
-            timestamp: new Date().toISOString(),
-            totale_stazioni: cache.chargeStationsData.length,
-            stazioni_trovate: nearbyStations.length,
-            stations: nearbyStations
-        });
-    } catch (error) {
-        console.error('Errore:', error);
-        res.status(500).json({
+    await updateDataIfNeeded();
+    
+    const { lat, lng, distance } = req.query;
+    
+    if (!lat || !lng || !distance) {
+        return res.status(400).json({
             status: 'error',
-            message: error.message
+            message: 'Parametri lat, lng e distance sono richiesti'
         });
     }
+
+    if (!cache.chargeStationsData) {
+        return res.status(503).json({
+            status: 'error',
+            message: 'Dati non ancora disponibili'
+        });
+    }
+
+    const userLat = parseFloat(lat);
+    const userLng = parseFloat(lng);
+    const maxDistance = parseFloat(distance);
+
+    // Ottieni solo le stazioni elettriche
+    let electricStations = cache.chargeStationsData
+        .filter(station => {
+            if (!station.AddressInfo || !station.AddressInfo.Latitude || !station.AddressInfo.Longitude) {
+                return false;
+            }
+            
+            const stationLat = station.AddressInfo.Latitude;
+            const stationLng = station.AddressInfo.Longitude;
+            const dist = calculateDistance(userLat, userLng, stationLat, stationLng);
+            station._distance = dist;
+            return dist <= maxDistance;
+        })
+        .map(station => {
+            const avgPower = station.Connections.reduce((sum, conn) => sum + (conn.PowerKW || 0), 0) / 
+                           (station.Connections.length || 1);
+            
+            const numBays = station.NumberOfPoints || station.Connections.length || 1;
+            
+            return {
+                id_stazione: station.ID.toString(),
+                tipo_stazione: 'Elettrica',
+                bandiera: station.OperatorInfo?.Title || "N/D",
+                dettagli_stazione: {
+                    gestore: station.OperatorInfo?.Title || "N/D",
+                    tipo: "Elettrica",
+                    nome: (station.AddressInfo.Title || "Stazione di ricarica") + ` (${numBays} colonnine)`
+                },
+                indirizzo: {
+                    via: station.AddressInfo.AddressLine1 || "N/D",
+                    comune: station.AddressInfo.Town || "N/D",
+                    provincia: station.AddressInfo.StateOrProvince || "N/D"
+                },
+                maps: {
+                    lat: station.AddressInfo.Latitude,
+                    lon: station.AddressInfo.Longitude
+                },
+                distanza: parseFloat(station._distance.toFixed(2)),
+                prezzi_carburanti: station.Connections.map(conn => {
+                    const potenzaKW = conn.PowerKW || avgPower || 0;
+                    let stimaPrezzo = null;
+                    
+                    if (potenzaKW > 0) {
+                        if (potenzaKW < 11) stimaPrezzo = 0.40;
+                        else if (potenzaKW < 50) stimaPrezzo = 0.50;
+                        else if (potenzaKW < 100) stimaPrezzo = 0.60;
+                        else stimaPrezzo = 0.70;
+                    }
+                    
+                    return {
+                        tipo: conn.ConnectionType?.Title || "Generico",
+                        prezzo: stimaPrezzo,
+                        self_service: true,
+                        ultimo_aggiornamento: station.DateLastStatusUpdate ? 
+                            new Date(station.DateLastStatusUpdate).toISOString().split('T')[0] : 
+                            new Date().toISOString().split('T')[0]
+                    };
+                })
+            };
+        })
+        .sort((a, b) => a.distanza - b.distanza)
+        .slice(0, parseInt(distance * 4));
+
+    res.json({
+        status: 'success',
+        timestamp: new Date().toISOString(),
+        totale_stazioni: cache.chargeStationsData.length,
+        stazioni_trovate: electricStations.length,
+        stations: electricStations
+    });
 });
+
 
 // Configurazione della porta
 const PORT = process.env.PORT || 3000;
