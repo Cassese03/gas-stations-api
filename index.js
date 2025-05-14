@@ -294,27 +294,47 @@ app.get('/gas-stations', async (req, res) => {
         if (response.ok) {
             const googleData = await response.json();
             if (googleData.results) {
-                googleStations = googleData.results.map(station => ({
-                    id_stazione: station.place_id,
-                    tipo_stazione: 'Elettrica (G)',
-                    bandiera: station.name || "N/D",
-                    dettagli_stazione: {
-                        gestore: station.name || "N/D",
-                        tipo: "Elettrica",
-                        nome: station.name || "Stazione di ricarica"
-                    },
-                    indirizzo: {
-                        via: station.vicinity || "N/D",
-                        comune: "N/D",
-                        provincia: "N/D"
-                    },
-                    maps: {
-                        lat: station.geometry.location.lat,
-                        lon: station.geometry.location.lng
-                    },
-                    distanza: calculateDistance(userLat, userLng, station.geometry.location.lat, station.geometry.location.lng),
-                    prezzi_carburanti: [] // Google Places API non fornisce prezzi
-                }));
+                googleStations = googleData.results.map(station => {
+                    const avgPower = 50; // Assumiamo una potenza media di 50 kW per le stazioni di Google
+                    let stimaPrezzo = null;
+
+                    if (avgPower > 0) {
+                        // Stima basata su tariffe medie in Italia
+                        if (avgPower < 11) stimaPrezzo = 0.40; // AC lenta
+                        else if (avgPower < 50) stimaPrezzo = 0.50; // AC veloce
+                        else if (avgPower < 100) stimaPrezzo = 0.60; // DC veloce
+                        else stimaPrezzo = 0.70; // DC ultra veloce
+                    }
+
+                    return {
+                        id_stazione: station.place_id,
+                        tipo_stazione: 'Elettrica (G)',
+                        bandiera: station.name || "N/D",
+                        dettagli_stazione: {
+                            gestore: station.name || "N/D",
+                            tipo: "Elettrica",
+                            nome: station.name || "Stazione di ricarica"
+                        },
+                        indirizzo: {
+                            via: station.vicinity || "N/D",
+                            comune: "N/D",
+                            provincia: "N/D"
+                        },
+                        maps: {
+                            lat: station.geometry.location.lat,
+                            lon: station.geometry.location.lng
+                        },
+                        distanza: calculateDistance(userLat, userLng, station.geometry.location.lat, station.geometry.location.lng),
+                        prezzi_carburanti: [{
+                            tipo: "Generico",
+                            potenza_kw: avgPower,
+                            prezzo: stimaPrezzo, // €/kWh stimato
+                            unita_misura: "€/kWh (stimato)",
+                            self_service: true,
+                            ultimo_aggiornamento: new Date().toISOString().split('T')[0]
+                        }]
+                    };
+                });
             }
         } else {
             console.error('Errore Google Places API:', response.statusText);
