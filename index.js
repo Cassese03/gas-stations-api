@@ -374,7 +374,7 @@ app.get('/gas-stations', async (req, res) => {
 
                     return {
                         id_stazione: station.id,
-                        tipo_stazione: 'Elettrica (G)',
+                        tipo_stazione: 'Elettrica',
                         bandiera: station.displayName.text + station.evChargeOptions.connectorCount.text || "N/D",
                         dettagli_stazione: {
                             gestore: station.displayName.text + station.evChargeOptions.connectorCount.text || "N/D",
