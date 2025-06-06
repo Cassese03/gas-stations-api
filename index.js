@@ -4,9 +4,6 @@ const fetch = require('node-fetch');
 const { Readable } = require('stream');
 const cors = require('cors');
 
-// Modifica l'import per utilizzare anche le funzioni
-const { localStationsData, localPricesData, metadata, saveLocalData, loadLocalData } = require('./localData');
-
 const app = express();
 
 // Rimuovi la configurazione CORS esistente e sostituiscila con questa
@@ -119,7 +116,7 @@ function logError(message, error) {
 function calculateDistance(lat1, lon1, lat2, lon2) {
     const R = 6371; // Raggio della Terra in km
     const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180; // Corretto qui: era (lon1 - lon1)
     const a =
         Math.sin(dLat / 2) * Math.sin(dLat / 2) +
         Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
@@ -129,20 +126,7 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
 }
 
 async function downloadAndParseCSV(url) {
-    // Su Vercel, usa sempre i dati locali per evitare errori ETIMEDOUT
-    if (isVercel) {
-        console.log(`[VERCEL-LOG] Utilizzo dati locali invece di scaricare da ${url}`);
-        
-        // Controlla quale file dati utilizzare
-        if (url.includes('anagrafica_impianti_attivi.csv')) {
-            return localStationsData;
-        } else if (url.includes('prezzo_alle_8.csv')) {
-            return localPricesData;
-        }
-        
-        return [];
-    }
-    
+    // Aumentato il timeout a 30 secondi anche su Vercel
     const timeout = 30000; // 30 secondi di timeout sia per Vercel che per ambiente locale
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
@@ -153,8 +137,10 @@ async function downloadAndParseCSV(url) {
     try {
         console.log(`[VERCEL-LOG] Tentativo download da ${url} con timeout di ${timeout}ms - Ambiente: ${isVercel ? 'Vercel' : 'Local'}`);
         
+        // Controllo se l'URL è quello problematico del MISE e provo URL alternativi
         let urlToUse = url;
         if (url.includes('mise.gov.it')) {
+            // Prova URL alternativi dal ministero (MIMIT è il nuovo nome del MISE)
             if (url.includes('anagrafica_impianti_attivi.csv')) {
                 console.log('[VERCEL-LOG] Utilizzo URL alternativo per anagrafica');
                 urlToUse = 'https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv';
@@ -173,6 +159,7 @@ async function downloadAndParseCSV(url) {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
             },
             signal: controller.signal,
+            // Alcuni ambienti fetch supportano il timeout come opzione diretta
             ...(typeof fetch.defaults === 'object' ? { timeout } : {})
         });
         
@@ -192,9 +179,10 @@ async function downloadAndParseCSV(url) {
 
             console.log(`[VERCEL-LOG] Inizio parsing CSV da ${urlToUse}`);
             
+            // Aggiungiamo un log periodico per tracciare l'avanzamento del parsing
             const progressInterval = setInterval(() => {
                 console.log(`[VERCEL-LOG] Progresso parsing CSV da ${urlToUse}: ${rowsProcessed} righe, ${bytesProcessed} bytes processati in ${(Date.now() - startTime)/1000}s`);
-            }, 5000);
+            }, 5000); // Log ogni 5 secondi
 
             Readable.from(response.body)
                 .pipe(csv({
@@ -227,12 +215,17 @@ async function downloadAndParseCSV(url) {
 
         if (error.name === 'AbortError') {
             const errorDetails = logError(`[DETTAGLIO ERRORE] La richiesta a ${url} è stata interrotta per timeout dopo ${timeout}ms`, error);
+            
+            // Log di sistema per vercel
             console.log(`[VERCEL-LOG] ERRORE TIMEOUT: ${url} - Dettaglio completo: ${JSON.stringify(errorDetails)}`);
         } else {
             const errorDetails = logError(`[DETTAGLIO ERRORE] Download fallito per ${url}`, error);
+            
+            // Log di sistema per vercel
             console.log(`[VERCEL-LOG] ERRORE DOWNLOAD: ${url} - Dettaglio completo: ${JSON.stringify(errorDetails)}`);
         }
 
+        // Su Vercel, se abbiamo un errore di timeout, ritorniamo subito i dati di fallback
         if (isVercel) {
             console.log('[VERCEL-LOG] Ambiente Vercel rilevato, utilizzo dati di fallback immediati');
             return url.includes('anagrafica_impianti_attivi.csv') 
@@ -240,31 +233,66 @@ async function downloadAndParseCSV(url) {
                 : cache.fallbackPricesData;
         }
         
+        // Ritorna un array vuoto per ambienti non-Vercel
+        return [];
+    }
+}
+
+async function downloadChargeStationsData(url) {
+    const timeout = 30000; // 30 secondi di timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+    try {
+        console.log('[VERCEL-LOG] Scaricamento dati stazioni di ricarica con timeout di 30s...');
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+            },
+            signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+            throw new Error(`Errore API: ${response.status} ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        console.log(`[VERCEL-LOG] Scaricate ${data.length} stazioni di ricarica`);
+        return data;
+    } catch (error) {
+        clearTimeout(timeoutId);
+
+        if (error.name === 'AbortError') {
+            console.error('[VERCEL-LOG] Errore: La richiesta stazioni di ricarica è stata interrotta (timeout 30s)');
+        } else {
+            console.error('[VERCEL-LOG] Errore scaricamento stazioni di ricarica:', error.message);
+        }
+
+        // Ritorna un array vuoto per evitare che il processo fallisca
         return [];
     }
 }
 
 async function updateDataIfNeeded() {
-    const updateInterval = isVercel ? 7 * 24 * 60 * 60 * 1000 : 23 * 60 * 60 * 1000;
+    // Su Vercel, utilizziamo un intervallo più lungo per aggiornare i dati
+    const updateInterval = isVercel ? 7 * 24 * 60 * 60 * 1000 : 23 * 60 * 60 * 1000; // 7 giorni su Vercel, 23 ore altrove
     
     if (!cache.lastUpdate || (Date.now() - cache.lastUpdate) > updateInterval) {
         try {
             console.log(`[VERCEL-LOG] Aggiornamento dati... (ambiente: ${isVercel ? 'Vercel' : 'Local'})`);
 
-            if (isVercel) {
-                console.log('[VERCEL-LOG] Ambiente Vercel: caricamento dati locali');
-                cache.stationsData = localStationsData;
-                cache.pricesData = localPricesData;
-                cache.lastUpdate = Date.now();
-                console.log(`[VERCEL-LOG] Dati locali caricati: ${localStationsData.length} stazioni, ${localPricesData.length} prezzi`);
-                return;
-            }
-            
+            // Aggiungi gestione degli errori migliorata
             let stations = [], prices = [], chargeStations = [];
             
+            // Anche su Vercel, ora facciamo tentativi più estesi con timeout di 30s
             try {
                 console.log('[VERCEL-LOG] Tentativo download dati con timeout di 30s');
                 
+                // Prima proviamo sequenzialmente per evitare sovraccarico
                 stations = await downloadAndParseCSV('https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv');
                 
                 if (stations.length > 0) {
@@ -272,6 +300,7 @@ async function updateDataIfNeeded() {
                     prices = await downloadAndParseCSV('https://www.mimit.gov.it/images/exportCSV/prezzo_alle_8.csv');
                 }
                 
+                // Se il download di uno dei due fallisce, proviamo l'URL alternativo
                 if (!stations.length) {
                     console.log('[VERCEL-LOG] Tentativo con URL alternativo per stazioni...');
                     stations = await downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv');
@@ -282,44 +311,31 @@ async function updateDataIfNeeded() {
                     prices = await downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/prezzo_alle_8.csv');
                 }
                 
+                // Solo se abbiamo ottenuto i dati principali, proviamo a scaricare anche le stazioni di ricarica
                 if (stations.length && prices.length && !isVercel) {
                     console.log('[VERCEL-LOG] Download dati principali completato, tentativo download stazioni ricarica...');
                     chargeStations = await downloadChargeStationsData('https://api.openchargemap.io/v3/poi/?output=json&countrycode=IT&key=65923063-f5a4-43cd-8ef9-3c1d64195d93&maxresults=1000');
-                    
-                    if (stations.length > 0 && prices.length > 0) {
-                        console.log('[VERCEL-LOG] Salvataggio dati scaricati con successo...');
-                        const savedSuccessfully = saveLocalData(stations, prices);
-                        if (savedSuccessfully) {
-                            console.log('[VERCEL-LOG] Dati salvati correttamente per uso futuro');
-                        }
-                    }
                 }
             } catch (e) {
                 console.error('[VERCEL-LOG] Errore download sequenziale:', e.message);
                 
-                console.log('[VERCEL-LOG] Tentativo di caricare i dati salvati in precedenza...');
-                const savedData = loadLocalData();
-                
-                if (!stations.length && savedData.localStationsData.length > 0) {
-                    stations = savedData.localStationsData;
-                    console.log(`[VERCEL-LOG] Utilizzati ${stations.length} stazioni dai dati salvati in precedenza`);
-                } else {
+                // Se il download fallisce, usiamo i dati di fallback
+                if (!stations.length) {
                     stations = cache.fallbackStationsData;
                     console.log('[VERCEL-LOG] Utilizzo dati di fallback per stazioni');
                 }
                 
-                if (!prices.length && savedData.localPricesData.length > 0) {
-                    prices = savedData.localPricesData;
-                    console.log(`[VERCEL-LOG] Utilizzati ${prices.length} prezzi dai dati salvati in precedenza`);
-                } else {
+                if (!prices.length) {
                     prices = cache.fallbackPricesData;
                     console.log('[VERCEL-LOG] Utilizzo dati di fallback per prezzi');
                 }
             }
 
+            // Verifica se abbiamo ottenuto dati validi
             if (stations?.length && prices?.length) {
                 console.log(`[VERCEL-LOG] Download completato: ${stations.length} stazioni, ${prices.length} prezzi`);
                 
+                // Se non abbiamo un slice di prima riga sui dati di fallback
                 if (stations !== cache.fallbackStationsData) {
                     cache.stationsData = stations.slice(1);
                 } else {
@@ -332,8 +348,10 @@ async function updateDataIfNeeded() {
                     cache.pricesData = prices;
                 }
 
+                // Trasforma i dati delle stazioni di ricarica con ID prefissati
                 if (chargeStations?.length) {
                     cache.chargeStationsData = chargeStations.map(station => {
+                        // Aggiungiamo il prefisso "999" all'ID
                         station.ID = '999' + station.ID.toString();
                         return station;
                     });
@@ -348,6 +366,7 @@ async function updateDataIfNeeded() {
                 console.error('[VERCEL-LOG] Non è stato possibile ottenere dati completi: stazioni=' + 
                     (stations?.length || 0) + ', prezzi=' + (prices?.length || 0));
                 
+                // Mantieni i dati precedenti se disponibili o usa il fallback
                 if (!cache.stationsData || cache.stationsData.length === 0) {
                     cache.stationsData = cache.fallbackStationsData;
                     console.log('[VERCEL-LOG] Utilizzati dati stazioni di fallback');
@@ -360,6 +379,7 @@ async function updateDataIfNeeded() {
             }
         } catch (error) {
             console.error('[VERCEL-LOG] Errore generale aggiornamento:', error.message);
+            // Assicurati che la cache abbia almeno array vuoti per evitare errori
             if (!cache.stationsData) cache.stationsData = cache.fallbackStationsData;
             if (!cache.pricesData) cache.pricesData = cache.fallbackPricesData;
             if (!cache.chargeStationsData) cache.chargeStationsData = [];
@@ -367,73 +387,593 @@ async function updateDataIfNeeded() {
     }
 }
 
-app.get('/save-local-data', async (req, res) => {
-    try {
-        if (!cache.stationsData || !cache.pricesData || 
-            cache.stationsData.length === 0 || cache.pricesData.length === 0) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'Nessun dato disponibile da salvare'
-            });
-        }
-        
-        const savedSuccessfully = saveLocalData(cache.stationsData, cache.pricesData);
-        
-        if (savedSuccessfully) {
-            return res.json({
-                status: 'success',
-                message: 'Dati salvati con successo',
-                count: {
-                    stations: cache.stationsData.length,
-                    prices: cache.pricesData.length
+// Modifica i route handler per usare la cache
+app.get('/gas-stations', async (req, res) => {
+    await updateDataIfNeeded();
+
+    const { lat, lng, distance } = req.query;
+
+    if (!lat || !lng || !distance) {
+        return res.status(400).json({
+            status: 'error',
+            message: 'Parametri lat, lng e distance sono richiesti'
+        });
+    }
+
+    if (!cache.stationsData || !cache.pricesData) {
+        return res.status(503).json({
+            status: 'error',
+            message: 'Dati non ancora disponibili'
+        });
+    }
+
+    const userLat = parseFloat(lat);
+    const userLng = parseFloat(lng);
+    const maxDistance = parseFloat(distance);
+
+    // 1. Ottieni le stazioni di benzina
+    let gasolineStations = cache.stationsData
+        .filter(station => {
+            const stationLat = parseFloat(station['_8']);
+            const stationLng = parseFloat(station['_9']);
+
+            if (isNaN(stationLat) || isNaN(stationLng)) {
+                return false;
+            }
+
+            const dist = calculateDistance(userLat, userLng, stationLat, stationLng);
+            station._distance = dist;
+            return dist <= maxDistance;
+        })
+        .map(station => {
+            const stationId = station['_0'];
+            const stationPrices = cache.pricesData.filter(p => p['_0'] === stationId);
+
+            return {
+                id_stazione: stationId,
+                tipo_stazione: 'Benzina', // Aggiungiamo un campo per distinguere
+                bandiera: station['_2'],
+                dettagli_stazione: {
+                    gestore: station['_1'],
+                    tipo: station['_3'],
+                    nome: station['_4']
                 },
-                timestamp: new Date().toISOString()
-            });
+                indirizzo: {
+                    via: station['_5'],
+                    comune: station['_6'],
+                    provincia: station['_7']
+                },
+                maps: {
+                    lat: parseFloat(station['_8']),
+                    lon: parseFloat(station['_9'])
+                },
+                distanza: Number(station._distance.toFixed(2)),
+                prezzi_carburanti: stationPrices.map(price => ({
+                    tipo: price['_1'],
+                    prezzo: parseFloat(price['_2']?.replace(',', '.')) || null,
+                    self_service: price['_3'] === '1',
+                    ultimo_aggiornamento: price['_4']
+                }))
+            };
+        });
+
+    // 2. Ottieni le stazioni elettriche
+    let electricStations = [];
+    // if (cache.chargeStationsData) {
+    //     electricStations = cache.chargeStationsData
+    //         .filter(station => {
+    //             if (!station.AddressInfo || !station.AddressInfo.Latitude || !station.AddressInfo.Longitude) {
+    //                 return false;
+    //             }
+
+    //             const stationLat = station.AddressInfo.Latitude;
+    //             const stationLng = station.AddressInfo.Longitude;
+    //             const dist = calculateDistance(userLat, userLng, stationLat, stationLng);
+    //             station._distance = dist;
+    //             return dist <= maxDistance;
+    //         })
+    //         .map(station => {
+    //             const avgPower = station.Connections.reduce((sum, conn) => sum + (conn.PowerKW || 0), 0) /
+    //                 (station.Connections.length || 1);
+
+    //             // Aggiungi il numero di colonnine disponibili
+    //             const numBays = station.NumberOfPoints || station.Connections.length || 1;
+
+    //             return {
+    //                 id_stazione: station.ID.toString(),
+    //                 tipo_stazione: `Elettrica`,
+    //                 bandiera: station.OperatorInfo?.Title || "N/D",
+    //                 dettagli_stazione: {
+    //                     gestore: station.OperatorInfo?.Title || "N/D",
+    //                     tipo: "Elettrica",
+    //                     nome: (station.AddressInfo.Title || "Stazione di ricarica") + ` (${numBays} colonnine)`
+    //                 },
+    //                 indirizzo: {
+    //                     via: station.AddressInfo.AddressLine1 || "N/D",
+    //                     comune: station.AddressInfo.Town || "N/D",
+    //                     provincia: station.AddressInfo.StateOrProvince || "N/D"
+    //                 },
+    //                 maps: {
+    //                     lat: station.AddressInfo.Latitude,
+    //                     lon: station.AddressInfo.Longitude
+    //                 },
+    //                 distanza: parseFloat(station._distance.toFixed(2)),
+    //                 prezzi_carburanti: station.Connections.map(conn => {
+    //                     const potenzaKW = conn.PowerKW || avgPower || 0;
+    //                     let stimaPrezzo = null;
+
+    //                     if (potenzaKW > 0) {
+    //                         // Stima basata su tariffe medie in Italia
+    //                         if (potenzaKW < 11) stimaPrezzo = 0.40; // AC lenta
+    //                         else if (potenzaKW < 50) stimaPrezzo = 0.50; // AC veloce
+    //                         else if (potenzaKW < 100) stimaPrezzo = 0.60; // DC veloce
+    //                         else stimaPrezzo = 0.70; // DC ultra veloce
+    //                     }
+
+    //                     return {
+    //                         tipo: conn.ConnectionType?.Title || "Generico",
+    //                         potenza_kw: parseFloat(potenzaKW.toFixed(2)),
+    //                         prezzo: stimaPrezzo, // €/kWh stimato
+    //                         unita_misura: "€/kWh (stimato)",
+    //                         self_service: true,
+    //                         ultimo_aggiornamento: station.DateLastStatusUpdate ?
+    //                             new Date(station.DateLastStatusUpdate).toISOString().split('T')[0] :
+    //                             new Date().toISOString().split('T')[0]
+    //                     };
+    //                 })
+    //             };
+    //         });
+    // }
+    // 3. Ottieni le stazioni di ricarica da Google Places API
+    let googleStations = [];
+    try {
+        const googleApiKey = 'AIzaSyCoiskCn8rH89TSLvX9rB6yTQO9c0dCcvM'; // Sostituisci con la tua chiave API
+        const googleApiUrl = 'https://places.googleapis.com/v1/places:searchText?languageCode=it';
+        response = await fetch(googleApiUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Goog-Api-Key': googleApiKey,
+                'X-Goog-FieldMask': 'places.id,places.name,places.displayName,places.evChargeOptions,places.location,places.formattedAddress,places.addressComponents',
+            },
+            body: JSON.stringify({
+
+                textQuery: "Stazioni di ricarica",
+                pageSize: distance*2 || 10,
+                evOptions: {
+                    minimumChargingRateKw: 1
+                },
+                locationBias: {
+                    circle: {
+                        center: {
+                            latitude: parseFloat(lat),
+                            longitude: parseFloat(lng)
+                        },
+                        radius: parseFloat(distance) * 10 // Convert distance to meters
+                    }
+
+                }
+            }),
+        });// Termina l'esecuzione del programma come farebbe dd() in PHP
+
+        if (response.status === 200) {
+            const googleData = await response.json();
+            if (googleData.places.length > 0) {
+                googleStations = googleData.places.map(async station => {
+                    //console.log('station:', station);
+
+                    //process.exit(0); Termina l'esecuzione del programma come farebbe dd() in PHP
+
+                    const avgPower = response.evChargeOptions?.connectorAggregation.maxChargeRateKw || 50; // Usa la potenza media se disponibile, altrimenti 50 kW
+                    let stimaPrezzo = null;
+
+                    if (avgPower > 0) {
+                        // Stima basata su tariffe medie in Italia
+                        if (avgPower < 11) stimaPrezzo = 0.40; // AC lenta
+                        else if (avgPower < 50) stimaPrezzo = 0.50; // AC veloce
+                        else if (avgPower < 100) stimaPrezzo = 0.60; // DC veloce
+                        else stimaPrezzo = 0.70; // DC ultra veloce
+                    }
+                    const locality = station.addressComponents.find(component => component.types[0] === "administrative_area_level_3")?.shortText || "N/D";
+                    const provincia = station.addressComponents.find(component => component.types[0] === "administrative_area_level_2")?.shortText || "N/D";
+
+                    return {
+                        id_stazione: station.id,
+                        tipo_stazione: 'Elettrica',
+                        bandiera: station.displayName.text + station.evChargeOptions.connectorCount.text || "N/D",
+                        dettagli_stazione: {
+                            gestore: station.displayName.text + station.evChargeOptions.connectorCount.text || "N/D",
+                            tipo: "Elettrica",
+                            nome: station.displayName.text + station.evChargeOptions.connectorCount.text || "Stazione di ricarica"
+                        },
+                        indirizzo: {
+                            via: station.formattedAddress || "N/D",
+                            comune: locality || "N/D",
+                            provincia: provincia || "N/D"
+                        },
+                        maps: {
+                            lat: station.location.latitude,
+                            lon: station.location.longitude
+                        },
+                        distanza: calculateDistance(userLat, userLng, parseFloat(station.location.latitude), parseFloat(station.location.longitude)),
+                        prezzi_carburanti: [{
+                            tipo: response.evChargeOptions?.connectorAggregation.type || "Generico",
+                            potenza_kw: avgPower,
+                            prezzo: stimaPrezzo, // €/kWh stimato
+                            unita_misura: "€/kWh (stimato)",
+                            self_service: true,
+                            ultimo_aggiornamento: new Date().toISOString().split('T')[0]
+                        }]
+                    };
+                });
+            }
         } else {
-            return res.status(500).json({
-                status: 'error',
-                message: 'Errore durante il salvataggio dei dati'
-            });
+            console.error('Errore Google Places API:', response.statusText);
         }
     } catch (error) {
-        console.error('Errore nel salvataggio manuale dei dati:', error);
-        return res.status(500).json({
+        console.error('Errore durante il recupero delle stazioni da Google Places API:', error.message);
+    }
+    googleStations = await Promise.all(googleStations);
+
+    // Unisci le stazioni di Google con le altre
+    const allStations = [...gasolineStations/*, ...electricStations,*/, ...googleStations]
+        .sort((a, b) => a.distanza - b.distanza)
+        .slice(0, parseInt(distance * 4));
+    // // 3. Unisci le stazioni e ordina per distanza
+    // const allStations = [...gasolineStations, ...electricStations]
+    //     .sort((a, b) => a.distanza - b.distanza)
+    //     .slice(0, parseInt(distance * 4));
+
+    res.json({
+        status: 'success',
+        timestamp: new Date().toISOString(),
+        totale_stazioni: (cache.stationsData.length) + (cache.chargeStationsData?.length || 0),
+        stazioni_trovate: allStations.length,
+        stations: allStations
+    });
+});
+
+app.get('/api/cron', async (req, res) => {
+    try {
+        await updateDataIfNeeded();
+    } catch (error) {
+        console.error('Error in cron job:', error);
+
+        res.json({ status: 'failed', timestamp: new Date().toISOString() });
+    }
+    res.json({ status: 'success', timestamp: new Date().toISOString() });
+
+});
+
+// Endpoint di health check con aggiornamento dati e informazioni sull'ambiente
+app.get('/health', async (req, res) => {
+    console.log('[VERCEL-LOG] Health check iniziato:', new Date().toISOString());
+
+    try {
+        // Esegui l'aggiornamento dei dati
+        await updateDataIfNeeded();
+
+        const healthStatus = {
+            status: 'online',
+            timestamp: new Date().toISOString(),
+            environment: isVercel ? 'vercel' : (process.env.NODE_ENV || 'development'),
+            serverInfo: {
+                nodeVersion: process.version,
+                platform: process.platform,
+                uptime: process.uptime(),
+                memory: process.memoryUsage(),
+            },
+            cache: {
+                lastUpdate: cache.lastUpdate,
+                stationsCount: cache.stationsData?.length || 0,
+                pricesCount: cache.pricesData?.length || 0,
+                chargeStationsCount: cache.chargeStationsData?.length || 0,
+                hasData: !!cache.stationsData && !!cache.pricesData,
+                usingFallbackData: 
+                    cache.stationsData === cache.fallbackStationsData || 
+                    cache.pricesData === cache.fallbackPricesData,
+                lastUpdateFormatted: cache.lastUpdate ? new Date(cache.lastUpdate).toISOString() : null
+            },
+            dataUpdateStatus: 'success'
+        };
+
+        res.json(healthStatus);
+    } catch (error) {
+        const loggedError = logError('Health check error', error);
+        res.status(500).json({
             status: 'error',
-            message: 'Errore interno del server',
-            error: error.message
+            timestamp: new Date().toISOString(),
+            environment: isVercel ? 'vercel' : (process.env.NODE_ENV || 'development'),
+            error: error.message,
+            errorDetails: isVercel ? loggedError : null,
+            cache: {
+                lastUpdate: cache.lastUpdate,
+                hasData: !!cache.stationsData && !!cache.pricesData,
+                usingFallbackData: 
+                    cache.stationsData === cache.fallbackStationsData || 
+                    cache.pricesData === cache.fallbackPricesData
+            }
         });
     }
 });
 
-app.get('/local-data-info', (req, res) => {
-    const freshData = loadLocalData();
-    
+// Endpoint per le stazioni di ricarica elettrica
+app.get('/charge-stations', async (req, res) => {
+    //await updateDataIfNeeded();
+
+    const { lat, lng, distance } = req.query;
+
+    if (!lat || !lng || !distance) {
+        return res.status(400).json({
+            status: 'error',
+            message: 'Parametri lat, lng e distance sono richiesti'
+        });
+    }
+
+    // if (!cache.chargeStationsData) {
+    //     return res.status(503).json({
+    //         status: 'error',
+    //         message: 'Dati non ancora disponibili'
+    //     });
+    // }
+
+    const userLat = parseFloat(lat);
+    const userLng = parseFloat(lng);
+    const maxDistance = parseFloat(distance);
+let googleStations = [];
+    try {
+        const googleApiKey = 'AIzaSyCoiskCn8rH89TSLvX9rB6yTQO9c0dCcvM'; // Sostituisci con la tua chiave API
+        const googleApiUrl = 'https://places.googleapis.com/v1/places:searchText?languageCode=it';
+        response = await fetch(googleApiUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Goog-Api-Key': googleApiKey,
+                'X-Goog-FieldMask': 'places.id,places.name,places.displayName,places.evChargeOptions,places.location,places.formattedAddress,places.addressComponents',
+            },
+            body: JSON.stringify({
+
+                textQuery: "Stazioni di ricarica",
+                pageSize: distance*2 || 10,
+                evOptions: {
+                    minimumChargingRateKw: 1
+                },
+                locationBias: {
+                    circle: {
+                        center: {
+                            latitude: parseFloat(lat),
+                            longitude: parseFloat(lng)
+                        },
+                        radius: parseFloat(distance) * 10 // Convert distance to meters
+                    }
+
+                }
+            }),
+        });// Termina l'esecuzione del programma come farebbe dd() in PHP
+
+        if (response.status === 200) {
+            const googleData = await response.json();
+            if (googleData.places.length > 0) {
+                googleStations = googleData.places.map(async station => {
+                    //console.log('station:', station);
+
+                    //process.exit(0); Termina l'esecuzione del programma come farebbe dd() in PHP
+                    // Recupera informazioni dettagliate per ogni stazione da Google Places API
+                    //         const placeDetailsUrl = `https://places.googleapis.com/v1/places/${station.place_id}?fields=id,displayName,evChargeOptions,addressDescriptor&key=${googleApiKey}`;
+                    //         const placeDetailsResponse = await fetch(placeDetailsUrl);
+
+                    //         let placeDetails = {};
+                    //         if (placeDetailsResponse.ok) {
+                    //             placeDetails = await placeDetailsResponse.json();
+                    //         } else {
+                    //             console.error(`Errore nel recupero dei dettagli per la stazione ${station.place_id}:`, placeDetailsResponse.statusText);
+                    //         }
+
+
+
+                    //                     const potenzaKW = conn.PowerKW || avgPower || 0;
+                    //                     let stimaPrezzo = null;
+
+                    //                     if (potenzaKW > 0) {
+                    //                         // Stima basata su tariffe medie in Italia
+                    //                         if (potenzaKW < 11) stimaPrezzo = 0.40; // AC lenta
+                    //                         else if (potenzaKW < 50) stimaPrezzo = 0.50; // AC veloce
+                    //                         else if (potenzaKW < 100) stimaPrezzo = 0.60; // DC veloce
+                    //                         else stimaPrezzo = 0.70; // DC ultra veloce
+                    //                     }
+
+                    //                     return {
+                    //                         tipo: conn.ConnectionType?.Title || "Generico",
+                    //                         potenza_kw: parseFloat(potenzaKW.toFixed(2)),
+                    //                         prezzo: stimaPrezzo, // €/kWh stimato
+                    //                         unita_misura: "€/kWh (stimato)",
+                    //                         self_service: true,
+                    //                         ultimo_aggiornamento: station.DateLastStatusUpdate ?
+                    //                             new Date(station.DateLastStatusUpdate).toISOString().split('T')[0] :
+                    //                             new Date().toISOString().split('T')[0]
+                    //                     };
+                    //                 
+
+                    const avgPower = response.evChargeOptions?.connectorAggregation.maxChargeRateKw || 50; // Usa la potenza media se disponibile, altrimenti 50 kW
+                    let stimaPrezzo = null;
+
+                    if (avgPower > 0) {
+                        // Stima basata su tariffe medie in Italia
+                        if (avgPower < 11) stimaPrezzo = 0.40; // AC lenta
+                        else if (avgPower < 50) stimaPrezzo = 0.50; // AC veloce
+                        else if (avgPower < 100) stimaPrezzo = 0.60; // DC veloce
+                        else stimaPrezzo = 0.70; // DC ultra veloce
+                    }
+                    const locality = station.addressComponents.find(component => component.types[0] === "administrative_area_level_3")?.shortText || "N/D";
+                    const provincia = station.addressComponents.find(component => component.types[0] === "administrative_area_level_2")?.shortText || "N/D";
+
+                    return {
+                        id_stazione: station.id,
+                        tipo_stazione: 'Elettrica',
+                        bandiera: station.displayName.text + station.evChargeOptions.connectorCount.text || "N/D",
+                        dettagli_stazione: {
+                            gestore: station.displayName.text + station.evChargeOptions.connectorCount.text || "N/D",
+                            tipo: "Elettrica",
+                            nome: station.displayName.text + station.evChargeOptions.connectorCount.text || "Stazione di ricarica"
+                        },
+                        indirizzo: {
+                            via: station.formattedAddress || "N/D",
+                            comune: locality || "N/D",
+                            provincia: provincia || "N/D"
+                        },
+                        maps: {
+                            lat: station.location.latitude,
+                            lon: station.location.longitude
+                        },
+                        distanza: calculateDistance(userLat, userLng, parseFloat(station.location.latitude), parseFloat(station.location.longitude)),
+                        prezzi_carburanti: [{
+                            tipo: response.evChargeOptions?.connectorAggregation.type || "Generico",
+                            potenza_kw: avgPower,
+                            prezzo: stimaPrezzo, // €/kWh stimato
+                            unita_misura: "€/kWh (stimato)",
+                            self_service: true,
+                            ultimo_aggiornamento: new Date().toISOString().split('T')[0]
+                        }]
+                    };
+                });
+            }
+        } else {
+            console.error('Errore Google Places API:', response.statusText);
+        }
+    } catch (error) {
+        console.error('Errore durante il recupero delle stazioni da Google Places API:', error.message);
+    }
+    googleStations = await Promise.all(googleStations
+        .sort((a, b) => a.distanza - b.distanza)
+        .slice(0, parseInt(distance * 4)));
+    // Ottieni solo le stazioni elettriche
+    /*let electricStations = cache.chargeStationsData
+        .filter(station => {
+            if (!station.AddressInfo || !station.AddressInfo.Latitude || !station.AddressInfo.Longitude) {
+                return false;
+            }
+
+            const stationLat = station.AddressInfo.Latitude;
+            const stationLng = station.AddressInfo.Longitude;
+            const dist = calculateDistance(userLat, userLng, stationLat, stationLng);
+            station._distance = dist;
+            return dist <= maxDistance;
+        })
+        .map(station => {
+            const avgPower = station.Connections.reduce((sum, conn) => sum + (conn.PowerKW || 0), 0) /
+                (station.Connections.length || 1);
+
+            const numBays = station.NumberOfPoints || station.Connections.length || 1;
+
+            return {
+                id_stazione: station.ID.toString(),
+                tipo_stazione: 'Elettrica',
+                bandiera: station.OperatorInfo?.Title || "N/D",
+                dettagli_stazione: {
+                    gestore: station.OperatorInfo?.Title || "N/D",
+                    tipo: "Elettrica",
+                    nome: (station.AddressInfo.Title || "Stazione di ricarica") + ` (${numBays} colonnine)`
+                },
+                indirizzo: {
+                    via: station.AddressInfo.AddressLine1 || "N/D",
+                    comune: station.AddressInfo.Town || "N/D",
+                    provincia: station.AddressInfo.StateOrProvince || "N/D"
+                },
+                maps: {
+                    lat: station.AddressInfo.Latitude,
+                    lon: station.AddressInfo.Longitude
+                },
+                distanza: parseFloat(station._distance.toFixed(2)),
+                prezzi_carburanti: station.Connections.map(conn => {
+                    const potenzaKW = conn.PowerKW || avgPower || 0;
+                    let stimaPrezzo = null;
+
+                    if (potenzaKW > 0) {
+                        if (potenzaKW < 11) stimaPrezzo = 0.40;
+                        else if (potenzaKW < 50) stimaPrezzo = 0.50;
+                        else if (potenzaKW < 100) stimaPrezzo = 0.60;
+                        else stimaPrezzo = 0.70;
+                    }
+
+                    return {
+                        tipo: conn.ConnectionType?.Title || "Generico",
+                        prezzo: stimaPrezzo,
+                        self_service: true,
+                        ultimo_aggiornamento: station.DateLastStatusUpdate ?
+                            new Date(station.DateLastStatusUpdate).toISOString().split('T')[0] :
+                            new Date().toISOString().split('T')[0]
+                    };
+                })
+            };
+        })
+        .sort((a, b) => a.distanza - b.distanza)
+        .slice(0, parseInt(distance * 4));
+        */
+
     res.json({
         status: 'success',
         timestamp: new Date().toISOString(),
-        currentLocalData: {
-            stationsCount: localStationsData.length,
-            pricesCount: localPricesData.length,
-            sampleStations: localStationsData.slice(0, 3),
-            samplePrices: localPricesData.slice(0, 3)
-        },
-        savedData: {
-            lastSaved: freshData.metadata.lastSaved,
-            stationsCount: freshData.localStationsData.length,
-            pricesCount: freshData.localPricesData.length
-        },
-        cacheData: {
-            stationsCount: cache.stationsData?.length || 0,
-            pricesCount: cache.pricesData?.length || 0,
-            lastUpdate: cache.lastUpdate ? new Date(cache.lastUpdate).toISOString() : null
-        },
-        environment: isVercel ? 'Vercel' : 'Local',
-        usingLocalData: isVercel ? true : false
+        totale_stazioni: googleStations.length,
+        stazioni_trovate: googleStations.length,
+        stations: googleStations
     });
 });
 
+// Aggiungi un endpoint di debug per testare i log su Vercel
+app.get('/debug', async (req, res) => {
+    console.log('[VERCEL-LOG] Debug endpoint chiamato');
+    
+    try {
+        // Simuliamo un errore per testare il logging
+        const testError = new Error('Questo è un errore di test');
+        testError.name = 'TestError';
+        testError.stack = new Error().stack;
+        
+        // Log dell'errore di test
+        logError('Test di logging errori', testError);
+        
+        // Test di timeout
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(), 100);
+        
+        try {
+            console.log('[VERCEL-LOG] Test di timeout iniziato');
+            await fetch('https://example.com', { 
+                signal: controller.signal,
+                timeout: 50
+            });
+        } catch (fetchError) {
+            logError('Test di errore abort', fetchError);
+        }
+        
+        res.json({
+            status: 'success',
+            message: 'Debug logs generati con successo',
+            environment: isVercel ? 'Vercel' : 'Local',
+            timestamp: new Date().toISOString(),
+            serverInfo: {
+                nodeVersion: process.version,
+                platform: process.platform,
+                memoryUsage: process.memoryUsage(),
+                uptime: process.uptime()
+            }
+        });
+    } catch (error) {
+        logError('Errore nel debug endpoint', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Errore durante il debug',
+            error: error.message,
+            errorName: error.name,
+            stack: isVercel ? error.stack : null // Mostra lo stack solo su Vercel per debug
+        });
+    }
+});
+
+// Configurazione della porta
 const PORT = process.env.PORT || 3000;
 
+// Avvio del server
 if (require.main === module) {
     app.listen(PORT, () => {
         console.log(`Server is running on port ${PORT}`);
