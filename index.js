@@ -93,6 +93,25 @@ let cache = {
     ]
 };
 
+// Funzione di logging migliorata per Vercel
+function logError(message, error) {
+    const errorDetails = {
+        message,
+        errorName: error?.name,
+        errorMessage: error?.message,
+        errorStack: error?.stack,
+        timestamp: new Date().toISOString(),
+        environment: isVercel ? 'Vercel' : 'Local'
+    };
+    
+    // In Vercel, console.error è il modo migliore per loggare errori
+    console.error(JSON.stringify(errorDetails, null, 2));
+    
+    // Invia anche a un servizio di logging esterno o salva in un file se necessario
+    // Se stai usando Vercel, considera di configurare un servizio come Sentry
+    return errorDetails;
+}
+
 // Funzione per calcolare la distanza tra due punti usando la formula di Haversine
 function calculateDistance(lat1, lon1, lat2, lon2) {
     const R = 6371; // Raggio della Terra in km
@@ -110,20 +129,23 @@ async function downloadAndParseCSV(url) {
     // Timeout più breve per Vercel
     const timeout = isVercel ? 8000 : 15000; 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    const timeoutId = setTimeout(() => {
+        controller.abort();
+        console.log(`[VERCEL-LOG] Timeout raggiunto dopo ${timeout}ms per URL: ${url}`);
+    }, timeout);
     
     try {
-        console.log(`Tentativo download da ${url} con timeout di ${timeout}ms`);
+        console.log(`[VERCEL-LOG] Tentativo download da ${url} con timeout di ${timeout}ms - Ambiente: ${isVercel ? 'Vercel' : 'Local'}`);
         
         // Controllo se l'URL è quello problematico del MISE e provo URL alternativi
         let urlToUse = url;
         if (url.includes('mise.gov.it')) {
             // Prova URL alternativi dal ministero (MIMIT è il nuovo nome del MISE)
             if (url.includes('anagrafica_impianti_attivi.csv')) {
-                console.log('Utilizzo URL alternativo per anagrafica');
+                console.log('[VERCEL-LOG] Utilizzo URL alternativo per anagrafica');
                 urlToUse = 'https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv';
             } else if (url.includes('prezzo_alle_8.csv')) {
-                console.log('Utilizzo URL alternativo per prezzi');
+                console.log('[VERCEL-LOG] Utilizzo URL alternativo per prezzi');
                 urlToUse = 'https://www.mimit.gov.it/images/exportCSV/prezzo_alle_8.csv';
             }
         }
@@ -140,7 +162,7 @@ async function downloadAndParseCSV(url) {
         clearTimeout(timeoutId);
         
         if (!response.ok) {
-            throw new Error(`Risposta HTTP non valida: ${response.status} ${response.statusText}`);
+            throw new Error(`Risposta HTTP non valida: ${response.status} ${response.statusText} per URL ${urlToUse}`);
         }
 
         return new Promise((resolve, reject) => {
@@ -160,11 +182,11 @@ async function downloadAndParseCSV(url) {
                     }
                 })
                 .on('end', () => {
-                    console.log(`Download completato con successo: ${results.length} righe`);
+                    console.log(`[VERCEL-LOG] Download completato con successo: ${results.length} righe da ${urlToUse}`);
                     resolve(results);
                 })
                 .on('error', (error) => {
-                    console.error(`Errore parsing CSV: ${error.message}`);
+                    const loggedError = logError(`Errore parsing CSV da ${urlToUse}`, error);
                     reject(error);
                 });
         });
@@ -172,14 +194,20 @@ async function downloadAndParseCSV(url) {
         clearTimeout(timeoutId);
 
         if (error.name === 'AbortError') {
-            console.error(`Errore: La richiesta a ${url} è stata interrotta (timeout o abort manuale)`);
+            const errorDetails = logError(`[DETTAGLIO ERRORE] La richiesta a ${url} è stata interrotta per timeout dopo ${timeout}ms`, error);
+            
+            // Log di sistema per vercel
+            console.log(`[VERCEL-LOG] ERRORE TIMEOUT: ${url} - Dettaglio completo: ${JSON.stringify(errorDetails)}`);
         } else {
-            console.error(`Download error per ${url}:`, error.message);
+            const errorDetails = logError(`[DETTAGLIO ERRORE] Download fallito per ${url}`, error);
+            
+            // Log di sistema per vercel
+            console.log(`[VERCEL-LOG] ERRORE DOWNLOAD: ${url} - Dettaglio completo: ${JSON.stringify(errorDetails)}`);
         }
 
         // Su Vercel, se abbiamo un errore di timeout, ritorniamo subito i dati di fallback
         if (isVercel) {
-            console.log('Ambiente Vercel rilevato, utilizzo dati di fallback immediati');
+            console.log('[VERCEL-LOG] Ambiente Vercel rilevato, utilizzo dati di fallback immediati');
             return url.includes('anagrafica_impianti_attivi.csv') 
                 ? cache.fallbackStationsData 
                 : cache.fallbackPricesData;
@@ -190,7 +218,6 @@ async function downloadAndParseCSV(url) {
     }
 }
 
-// Nuova funzione per scaricare dati JSON dalle stazioni di ricarica elettrica
 async function downloadChargeStationsData(url) {
     const timeout = 15000; // 15 secondi di timeout
     const controller = new AbortController();
@@ -616,7 +643,7 @@ app.get('/api/cron', async (req, res) => {
 
 // Endpoint di health check con aggiornamento dati e informazioni sull'ambiente
 app.get('/health', async (req, res) => {
-    console.log('Health check iniziato:', new Date().toISOString());
+    console.log('[VERCEL-LOG] Health check iniziato:', new Date().toISOString());
 
     try {
         // Esegui l'aggiornamento dei dati
@@ -626,6 +653,12 @@ app.get('/health', async (req, res) => {
             status: 'online',
             timestamp: new Date().toISOString(),
             environment: isVercel ? 'vercel' : (process.env.NODE_ENV || 'development'),
+            serverInfo: {
+                nodeVersion: process.version,
+                platform: process.platform,
+                uptime: process.uptime(),
+                memory: process.memoryUsage(),
+            },
             cache: {
                 lastUpdate: cache.lastUpdate,
                 stationsCount: cache.stationsData?.length || 0,
@@ -637,19 +670,18 @@ app.get('/health', async (req, res) => {
                     cache.pricesData === cache.fallbackPricesData,
                 lastUpdateFormatted: cache.lastUpdate ? new Date(cache.lastUpdate).toISOString() : null
             },
-            uptime: process.uptime(),
-            memory: process.memoryUsage(),
             dataUpdateStatus: 'success'
         };
 
         res.json(healthStatus);
     } catch (error) {
-        console.error('Health check error:', error);
+        const loggedError = logError('Health check error', error);
         res.status(500).json({
             status: 'error',
             timestamp: new Date().toISOString(),
             environment: isVercel ? 'vercel' : (process.env.NODE_ENV || 'development'),
             error: error.message,
+            errorDetails: isVercel ? loggedError : null,
             cache: {
                 lastUpdate: cache.lastUpdate,
                 hasData: !!cache.stationsData && !!cache.pricesData,
@@ -883,6 +915,56 @@ let googleStations = [];
     });
 });
 
+// Aggiungi un endpoint di debug per testare i log su Vercel
+app.get('/debug', async (req, res) => {
+    console.log('[VERCEL-LOG] Debug endpoint chiamato');
+    
+    try {
+        // Simuliamo un errore per testare il logging
+        const testError = new Error('Questo è un errore di test');
+        testError.name = 'TestError';
+        testError.stack = new Error().stack;
+        
+        // Log dell'errore di test
+        logError('Test di logging errori', testError);
+        
+        // Test di timeout
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(), 100);
+        
+        try {
+            console.log('[VERCEL-LOG] Test di timeout iniziato');
+            await fetch('https://example.com', { 
+                signal: controller.signal,
+                timeout: 50
+            });
+        } catch (fetchError) {
+            logError('Test di errore abort', fetchError);
+        }
+        
+        res.json({
+            status: 'success',
+            message: 'Debug logs generati con successo',
+            environment: isVercel ? 'Vercel' : 'Local',
+            timestamp: new Date().toISOString(),
+            serverInfo: {
+                nodeVersion: process.version,
+                platform: process.platform,
+                memoryUsage: process.memoryUsage(),
+                uptime: process.uptime()
+            }
+        });
+    } catch (error) {
+        logError('Errore nel debug endpoint', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Errore durante il debug',
+            error: error.message,
+            errorName: error.name,
+            stack: isVercel ? error.stack : null // Mostra lo stack solo su Vercel per debug
+        });
+    }
+});
 
 // Configurazione della porta
 const PORT = process.env.PORT || 3000;
