@@ -9,10 +9,21 @@
   "routes": [
     {
       "src": "/(.*)",
+      "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+      "headers": {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "*",
+        "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+        "Access-Control-Allow-Credentials": "true"
+      },
       "dest": "index.js"
+      
     }
   ],
-  "env": {
-    "VERCEL": "1"
-  }
+  "crons": [
+    {
+    "path": "/health",
+    "schedule": "0 11 * * *"
+    }
+  ]
 }
