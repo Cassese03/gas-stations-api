@@ -24,12 +24,73 @@ app.use((req, res, next) => {
     next();
 });
 
+// Rilevamento dell'ambiente Vercel
+const isVercel = process.env.VERCEL === '1' || process.env.VERCEL_ENV;
+
 // Cache per i dati con timestamp
 let cache = {
     stationsData: null,
     pricesData: null,
     chargeStationsData: null,
-    lastUpdate: null
+    lastUpdate: null,
+    
+    // Dati di fallback minimi
+    fallbackStationsData: [
+        {
+            "_0": "1000001",
+            "_1": "GESTORE ESEMPIO",
+            "_2": "ESSO",
+            "_3": "Stradale",
+            "_4": "STAZIONE ESEMPIO 1",
+            "_5": "Via Roma 123",
+            "_6": "ROMA",
+            "_7": "RM",
+            "_8": "41.9028",
+            "_9": "12.4964"
+        },
+        {
+            "_0": "1000002",
+            "_1": "GESTORE ESEMPIO 2",
+            "_2": "Q8",
+            "_3": "Stradale",
+            "_4": "STAZIONE ESEMPIO 2",
+            "_5": "Via Milano 456",
+            "_6": "MILANO",
+            "_7": "MI",
+            "_8": "45.4642",
+            "_9": "9.1900"
+        }
+    ],
+    fallbackPricesData: [
+        {
+            "_0": "1000001",
+            "_1": "Benzina",
+            "_2": "1,899",
+            "_3": "1",
+            "_4": "2023-05-01"
+        },
+        {
+            "_0": "1000001",
+            "_1": "Gasolio",
+            "_2": "1,799",
+            "_3": "1",
+            "_4": "2023-05-01"
+        },
+        {
+            "_0": "1000002",
+            "_1": "Benzina",
+            "_2": "1,889",
+            "_3": "1",
+            "_4": "2023-05-01"
+        },
+        {
+            "_0": "1000002",
+            "_1": "Gasolio",
+            "_2": "1,789",
+            "_3": "1",
+            "_4": "2023-05-01"
+        }
+    ]
 };
 
 // Funzione per calcolare la distanza tra due punti usando la formula di Haversine
@@ -46,12 +107,13 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
 }
 
 async function downloadAndParseCSV(url) {
-    const timeout = 15000; // 15 secondi di timeout
+    // Timeout più breve per Vercel
+    const timeout = isVercel ? 8000 : 15000; 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeout);
     
     try {
-        console.log(`Tentativo download da ${url}`);
+        console.log(`Tentativo download da ${url} con timeout di ${timeout}ms`);
         
         // Controllo se l'URL è quello problematico del MISE e provo URL alternativi
         let urlToUse = url;
@@ -88,7 +150,7 @@ async function downloadAndParseCSV(url) {
             Readable.from(response.body)
                 .pipe(csv({
                     separator: ';',
-                    mapHeaders: ({ header, index }) => `_${index}` // Questo trasforma gli header in _0, _1, _2, ecc.
+                    mapHeaders: ({ header, index }) => `_${index}`
                 }))
                 .on('data', (data) => {
                     if (!isFirstRow) {
@@ -110,12 +172,20 @@ async function downloadAndParseCSV(url) {
         clearTimeout(timeoutId);
 
         if (error.name === 'AbortError') {
-            console.error('Errore: La richiesta è stata interrotta (timeout o abort manuale)');
+            console.error(`Errore: La richiesta a ${url} è stata interrotta (timeout o abort manuale)`);
         } else {
-            console.error('Download error:', error.message);
+            console.error(`Download error per ${url}:`, error.message);
         }
 
-        // Ritorna un array vuoto per evitare che il processo fallisca
+        // Su Vercel, se abbiamo un errore di timeout, ritorniamo subito i dati di fallback
+        if (isVercel) {
+            console.log('Ambiente Vercel rilevato, utilizzo dati di fallback immediati');
+            return url.includes('anagrafica_impianti_attivi.csv') 
+                ? cache.fallbackStationsData 
+                : cache.fallbackPricesData;
+        }
+        
+        // Ritorna un array vuoto per ambienti non-Vercel
         return [];
     }
 }
@@ -161,61 +231,91 @@ async function downloadChargeStationsData(url) {
 }
 
 async function updateDataIfNeeded() {
-    // Aggiorna i dati solo se sono passate più di 23 ore dall'ultimo aggiornamento
-    const HOURS_23 = 23 * 60 * 60 * 1000;
-
-    if (!cache.lastUpdate || (Date.now() - cache.lastUpdate) > HOURS_23) {
+    // Su Vercel, utilizziamo un intervallo più lungo per aggiornare i dati
+    const updateInterval = isVercel ? 7 * 24 * 60 * 60 * 1000 : 23 * 60 * 60 * 1000; // 7 giorni su Vercel, 23 ore altrove
+    
+    if (!cache.lastUpdate || (Date.now() - cache.lastUpdate) > updateInterval) {
         try {
-            console.log('Aggiornamento dati...');
+            console.log(`Aggiornamento dati... (ambiente: ${isVercel ? 'Vercel' : 'Local'})`);
 
             // Aggiungi gestione degli errori migliorata
             let stations = [], prices = [], chargeStations = [];
             
-            try {
-                // Primo tentativo con URL mimit.gov.it
-                [stations, prices, chargeStations] = await Promise.all([
-                    downloadAndParseCSV('https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv'),
-                    downloadAndParseCSV('https://www.mimit.gov.it/images/exportCSV/prezzo_alle_8.csv'),
-                    downloadChargeStationsData('https://api.openchargemap.io/v3/poi/?output=json&countrycode=IT&key=65923063-f5a4-43cd-8ef9-3c1d64195d93&maxresults=1000')
-                ]);
-                
-                // Se non abbiamo ottenuto dati, proviamo con gli URL originali mise.gov.it
-                if (!stations.length || !prices.length) {
-                    console.log('Primo tentativo fallito, provo URLs alternativi...');
-                    [stations, prices] = await Promise.all([
-                        downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv'),
-                        downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/prezzo_alle_8.csv')
-                    ]);
-                }
-            } catch (downloadError) {
-                console.error('Errore durante il download parallelo:', downloadError.message);
-                
-                // Proviamo a scaricare i file uno alla volta per isolare il problema
-                console.log('Tentativo download sequenziale...');
+            // Su Vercel, usiamo una strategia più cauta
+            if (isVercel) {
                 try {
+                    // Tentativo singolo con timeout ridotto
+                    console.log('Ambiente Vercel: tentativo con timeout ridotto');
                     stations = await downloadAndParseCSV('https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv');
-                } catch (e) {
-                    console.error('Errore download stazioni:', e.message);
-                }
-                
-                try {
                     prices = await downloadAndParseCSV('https://www.mimit.gov.it/images/exportCSV/prezzo_alle_8.csv');
                 } catch (e) {
-                    console.error('Errore download prezzi:', e.message);
+                    console.error('Errore download su Vercel:', e.message);
+                    // Su Vercel, usiamo subito i dati di fallback
+                    stations = cache.fallbackStationsData;
+                    prices = cache.fallbackPricesData;
                 }
-                
+            } else {
+                // In ambiente locale, facciamo tentativi più estesi
                 try {
-                    chargeStations = await downloadChargeStationsData('https://api.openchargemap.io/v3/poi/?output=json&countrycode=IT&key=65923063-f5a4-43cd-8ef9-3c1d64195d93&maxresults=1000');
-                } catch (e) {
-                    console.error('Errore download stazioni ricarica:', e.message);
+                    // Primo tentativo con URL mimit.gov.it
+                    [stations, prices, chargeStations] = await Promise.all([
+                        downloadAndParseCSV('https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv'),
+                        downloadAndParseCSV('https://www.mimit.gov.it/images/exportCSV/prezzo_alle_8.csv'),
+                        downloadChargeStationsData('https://api.openchargemap.io/v3/poi/?output=json&countrycode=IT&key=65923063-f5a4-43cd-8ef9-3c1d64195d93&maxresults=1000')
+                    ]);
+                    
+                    // Se non abbiamo ottenuto dati, proviamo con gli URL originali mise.gov.it
+                    if (!stations.length || !prices.length) {
+                        console.log('Primo tentativo fallito, provo URLs alternativi...');
+                        [stations, prices] = await Promise.all([
+                            downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv'),
+                            downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/prezzo_alle_8.csv')
+                        ]);
+                    }
+                } catch (downloadError) {
+                    console.error('Errore durante il download parallelo:', downloadError.message);
+                    
+                    // Proviamo a scaricare i file uno alla volta per isolare il problema
+                    console.log('Tentativo download sequenziale...');
+                    try {
+                        stations = await downloadAndParseCSV('https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv');
+                    } catch (e) {
+                        console.error('Errore download stazioni:', e.message);
+                        stations = cache.fallbackStationsData;
+                    }
+                    
+                    try {
+                        prices = await downloadAndParseCSV('https://www.mimit.gov.it/images/exportCSV/prezzo_alle_8.csv');
+                    } catch (e) {
+                        console.error('Errore download prezzi:', e.message);
+                        prices = cache.fallbackPricesData;
+                    }
+                    
+                    try {
+                        chargeStations = await downloadChargeStationsData('https://api.openchargemap.io/v3/poi/?output=json&countrycode=IT&key=65923063-f5a4-43cd-8ef9-3c1d64195d93&maxresults=1000');
+                    } catch (e) {
+                        console.error('Errore download stazioni ricarica:', e.message);
+                        chargeStations = [];
+                    }
                 }
             }
 
             // Verifica se abbiamo ottenuto dati validi
             if (stations?.length && prices?.length) {
                 console.log(`Download completato: ${stations.length} stazioni, ${prices.length} prezzi`);
-                cache.stationsData = stations.slice(1);
-                cache.pricesData = prices.slice(1);
+                
+                // Se non abbiamo un slice di prima riga sui dati di fallback
+                if (stations !== cache.fallbackStationsData) {
+                    cache.stationsData = stations.slice(1);
+                } else {
+                    cache.stationsData = stations;
+                }
+                
+                if (prices !== cache.fallbackPricesData) {
+                    cache.pricesData = prices.slice(1);
+                } else {
+                    cache.pricesData = prices;
+                }
 
                 // Trasforma i dati delle stazioni di ricarica con ID prefissati
                 if (chargeStations?.length) {
@@ -232,18 +332,25 @@ async function updateDataIfNeeded() {
                 cache.lastUpdate = Date.now();
                 console.log('Dati aggiornati con successo');
             } else {
-                console.error('Non è stato possibile ottenere dati completi: stazioni='+stations.length+', prezzi='+prices.length);
+                console.error('Non è stato possibile ottenere dati completi: stazioni=' + 
+                    (stations?.length || 0) + ', prezzi=' + (prices?.length || 0));
                 
-                // Mantieni i dati precedenti se disponibili
-                if (!cache.stationsData) cache.stationsData = [];
-                if (!cache.pricesData) cache.pricesData = [];
+                // Mantieni i dati precedenti se disponibili o usa il fallback
+                if (!cache.stationsData || cache.stationsData.length === 0) {
+                    cache.stationsData = cache.fallbackStationsData;
+                    console.log('Utilizzati dati stazioni di fallback');
+                }
+                if (!cache.pricesData || cache.pricesData.length === 0) {
+                    cache.pricesData = cache.fallbackPricesData;
+                    console.log('Utilizzati dati prezzi di fallback');
+                }
                 if (!cache.chargeStationsData) cache.chargeStationsData = [];
             }
         } catch (error) {
             console.error('Errore generale aggiornamento:', error.message);
             // Assicurati che la cache abbia almeno array vuoti per evitare errori
-            if (!cache.stationsData) cache.stationsData = [];
-            if (!cache.pricesData) cache.pricesData = [];
+            if (!cache.stationsData) cache.stationsData = cache.fallbackStationsData;
+            if (!cache.pricesData) cache.pricesData = cache.fallbackPricesData;
             if (!cache.chargeStationsData) cache.chargeStationsData = [];
         }
     }
@@ -507,7 +614,7 @@ app.get('/api/cron', async (req, res) => {
 
 });
 
-// Endpoint di health check con aggiornamento dati
+// Endpoint di health check con aggiornamento dati e informazioni sull'ambiente
 app.get('/health', async (req, res) => {
     console.log('Health check iniziato:', new Date().toISOString());
 
@@ -518,17 +625,20 @@ app.get('/health', async (req, res) => {
         const healthStatus = {
             status: 'online',
             timestamp: new Date().toISOString(),
+            environment: isVercel ? 'vercel' : (process.env.NODE_ENV || 'development'),
             cache: {
                 lastUpdate: cache.lastUpdate,
                 stationsCount: cache.stationsData?.length || 0,
                 pricesCount: cache.pricesData?.length || 0,
-                chargeStationsCount: cache.chargeStationsData?.length || 0, // Aggiunta questa riga
-                hasData: !!cache.stationsData && !!cache.pricesData && !!cache.chargeStationsData,
+                chargeStationsCount: cache.chargeStationsData?.length || 0,
+                hasData: !!cache.stationsData && !!cache.pricesData,
+                usingFallbackData: 
+                    cache.stationsData === cache.fallbackStationsData || 
+                    cache.pricesData === cache.fallbackPricesData,
                 lastUpdateFormatted: cache.lastUpdate ? new Date(cache.lastUpdate).toISOString() : null
             },
             uptime: process.uptime(),
             memory: process.memoryUsage(),
-            environment: process.env.NODE_ENV || 'development',
             dataUpdateStatus: 'success'
         };
 
@@ -538,10 +648,14 @@ app.get('/health', async (req, res) => {
         res.status(500).json({
             status: 'error',
             timestamp: new Date().toISOString(),
+            environment: isVercel ? 'vercel' : (process.env.NODE_ENV || 'development'),
             error: error.message,
             cache: {
                 lastUpdate: cache.lastUpdate,
-                hasData: !!cache.stationsData && !!cache.pricesData && !!cache.chargeStationsData
+                hasData: !!cache.stationsData && !!cache.pricesData,
+                usingFallbackData: 
+                    cache.stationsData === cache.fallbackStationsData || 
+                    cache.pricesData === cache.fallbackPricesData
             }
         });
     }
