@@ -14,5 +14,15 @@
   ],
   "env": {
     "VERCEL": "1"
+  },
+  "functions": {
+    "api/*.js": {
+      "memory": 1024,
+      "maxDuration": 60
+    },
+    "index.js": {
+      "memory": 1024,
+      "maxDuration": 60
+    }
   }
 }

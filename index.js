@@ -126,8 +126,8 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
 }
 
 async function downloadAndParseCSV(url) {
-    // Timeout più breve per Vercel
-    const timeout = isVercel ? 8000 : 15000; 
+    // Aumentato il timeout a 30 secondi anche su Vercel
+    const timeout = 30000; // 30 secondi di timeout sia per Vercel che per ambiente locale
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
         controller.abort();
@@ -150,16 +150,21 @@ async function downloadAndParseCSV(url) {
             }
         }
         
+        console.log(`[VERCEL-LOG] Inizio download da ${urlToUse} con timeout di ${timeout}ms`);
+        
         const response = await fetch(urlToUse, {
             method: 'GET',
             headers: {
                 'Accept': 'text/csv,application/csv',
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
             },
-            signal: controller.signal
+            signal: controller.signal,
+            // Alcuni ambienti fetch supportano il timeout come opzione diretta
+            ...(typeof fetch.defaults === 'object' ? { timeout } : {})
         });
         
         clearTimeout(timeoutId);
+        console.log(`[VERCEL-LOG] Risposta ricevuta da ${urlToUse} - Status: ${response.status}`);
         
         if (!response.ok) {
             throw new Error(`Risposta HTTP non valida: ${response.status} ${response.statusText} per URL ${urlToUse}`);
@@ -168,6 +173,16 @@ async function downloadAndParseCSV(url) {
         return new Promise((resolve, reject) => {
             const results = [];
             let isFirstRow = true;
+            let bytesProcessed = 0;
+            let rowsProcessed = 0;
+            const startTime = Date.now();
+
+            console.log(`[VERCEL-LOG] Inizio parsing CSV da ${urlToUse}`);
+            
+            // Aggiungiamo un log periodico per tracciare l'avanzamento del parsing
+            const progressInterval = setInterval(() => {
+                console.log(`[VERCEL-LOG] Progresso parsing CSV da ${urlToUse}: ${rowsProcessed} righe, ${bytesProcessed} bytes processati in ${(Date.now() - startTime)/1000}s`);
+            }, 5000); // Log ogni 5 secondi
 
             Readable.from(response.body)
                 .pipe(csv({
@@ -180,12 +195,17 @@ async function downloadAndParseCSV(url) {
                     } else {
                         isFirstRow = false;
                     }
+                    rowsProcessed++;
+                    bytesProcessed += JSON.stringify(data).length;
                 })
                 .on('end', () => {
-                    console.log(`[VERCEL-LOG] Download completato con successo: ${results.length} righe da ${urlToUse}`);
+                    clearInterval(progressInterval);
+                    const elapsedTime = (Date.now() - startTime)/1000;
+                    console.log(`[VERCEL-LOG] Download completato con successo: ${results.length} righe da ${urlToUse} in ${elapsedTime}s`);
                     resolve(results);
                 })
                 .on('error', (error) => {
+                    clearInterval(progressInterval);
                     const loggedError = logError(`Errore parsing CSV da ${urlToUse}`, error);
                     reject(error);
                 });
@@ -219,12 +239,12 @@ async function downloadAndParseCSV(url) {
 }
 
 async function downloadChargeStationsData(url) {
-    const timeout = 15000; // 15 secondi di timeout
+    const timeout = 30000; // 30 secondi di timeout
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeout);
 
     try {
-        console.log('Scaricamento dati stazioni di ricarica...');
+        console.log('[VERCEL-LOG] Scaricamento dati stazioni di ricarica con timeout di 30s...');
         const response = await fetch(url, {
             method: 'GET',
             headers: {
@@ -241,15 +261,15 @@ async function downloadChargeStationsData(url) {
         }
 
         const data = await response.json();
-        console.log(`Scaricate ${data.length} stazioni di ricarica`);
+        console.log(`[VERCEL-LOG] Scaricate ${data.length} stazioni di ricarica`);
         return data;
     } catch (error) {
         clearTimeout(timeoutId);
 
         if (error.name === 'AbortError') {
-            console.error('Errore: La richiesta è stata interrotta (timeout o abort manuale)');
+            console.error('[VERCEL-LOG] Errore: La richiesta stazioni di ricarica è stata interrotta (timeout 30s)');
         } else {
-            console.error('Errore scaricamento stazioni di ricarica:', error.message);
+            console.error('[VERCEL-LOG] Errore scaricamento stazioni di ricarica:', error.message);
         }
 
         // Ritorna un array vuoto per evitare che il processo fallisca
@@ -263,73 +283,57 @@ async function updateDataIfNeeded() {
     
     if (!cache.lastUpdate || (Date.now() - cache.lastUpdate) > updateInterval) {
         try {
-            console.log(`Aggiornamento dati... (ambiente: ${isVercel ? 'Vercel' : 'Local'})`);
+            console.log(`[VERCEL-LOG] Aggiornamento dati... (ambiente: ${isVercel ? 'Vercel' : 'Local'})`);
 
             // Aggiungi gestione degli errori migliorata
             let stations = [], prices = [], chargeStations = [];
             
-            // Su Vercel, usiamo una strategia più cauta
-            if (isVercel) {
-                try {
-                    // Tentativo singolo con timeout ridotto
-                    console.log('Ambiente Vercel: tentativo con timeout ridotto');
-                    stations = await downloadAndParseCSV('https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv');
+            // Anche su Vercel, ora facciamo tentativi più estesi con timeout di 30s
+            try {
+                console.log('[VERCEL-LOG] Tentativo download dati con timeout di 30s');
+                
+                // Prima proviamo sequenzialmente per evitare sovraccarico
+                stations = await downloadAndParseCSV('https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv');
+                
+                if (stations.length > 0) {
+                    console.log('[VERCEL-LOG] Download stazioni completato, tentativo download prezzi...');
                     prices = await downloadAndParseCSV('https://www.mimit.gov.it/images/exportCSV/prezzo_alle_8.csv');
-                } catch (e) {
-                    console.error('Errore download su Vercel:', e.message);
-                    // Su Vercel, usiamo subito i dati di fallback
-                    stations = cache.fallbackStationsData;
-                    prices = cache.fallbackPricesData;
                 }
-            } else {
-                // In ambiente locale, facciamo tentativi più estesi
-                try {
-                    // Primo tentativo con URL mimit.gov.it
-                    [stations, prices, chargeStations] = await Promise.all([
-                        downloadAndParseCSV('https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv'),
-                        downloadAndParseCSV('https://www.mimit.gov.it/images/exportCSV/prezzo_alle_8.csv'),
-                        downloadChargeStationsData('https://api.openchargemap.io/v3/poi/?output=json&countrycode=IT&key=65923063-f5a4-43cd-8ef9-3c1d64195d93&maxresults=1000')
-                    ]);
-                    
-                    // Se non abbiamo ottenuto dati, proviamo con gli URL originali mise.gov.it
-                    if (!stations.length || !prices.length) {
-                        console.log('Primo tentativo fallito, provo URLs alternativi...');
-                        [stations, prices] = await Promise.all([
-                            downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv'),
-                            downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/prezzo_alle_8.csv')
-                        ]);
-                    }
-                } catch (downloadError) {
-                    console.error('Errore durante il download parallelo:', downloadError.message);
-                    
-                    // Proviamo a scaricare i file uno alla volta per isolare il problema
-                    console.log('Tentativo download sequenziale...');
-                    try {
-                        stations = await downloadAndParseCSV('https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv');
-                    } catch (e) {
-                        console.error('Errore download stazioni:', e.message);
-                        stations = cache.fallbackStationsData;
-                    }
-                    
-                    try {
-                        prices = await downloadAndParseCSV('https://www.mimit.gov.it/images/exportCSV/prezzo_alle_8.csv');
-                    } catch (e) {
-                        console.error('Errore download prezzi:', e.message);
-                        prices = cache.fallbackPricesData;
-                    }
-                    
-                    try {
-                        chargeStations = await downloadChargeStationsData('https://api.openchargemap.io/v3/poi/?output=json&countrycode=IT&key=65923063-f5a4-43cd-8ef9-3c1d64195d93&maxresults=1000');
-                    } catch (e) {
-                        console.error('Errore download stazioni ricarica:', e.message);
-                        chargeStations = [];
-                    }
+                
+                // Se il download di uno dei due fallisce, proviamo l'URL alternativo
+                if (!stations.length) {
+                    console.log('[VERCEL-LOG] Tentativo con URL alternativo per stazioni...');
+                    stations = await downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv');
+                }
+                
+                if (!prices.length) {
+                    console.log('[VERCEL-LOG] Tentativo con URL alternativo per prezzi...');
+                    prices = await downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/prezzo_alle_8.csv');
+                }
+                
+                // Solo se abbiamo ottenuto i dati principali, proviamo a scaricare anche le stazioni di ricarica
+                if (stations.length && prices.length && !isVercel) {
+                    console.log('[VERCEL-LOG] Download dati principali completato, tentativo download stazioni ricarica...');
+                    chargeStations = await downloadChargeStationsData('https://api.openchargemap.io/v3/poi/?output=json&countrycode=IT&key=65923063-f5a4-43cd-8ef9-3c1d64195d93&maxresults=1000');
+                }
+            } catch (e) {
+                console.error('[VERCEL-LOG] Errore download sequenziale:', e.message);
+                
+                // Se il download fallisce, usiamo i dati di fallback
+                if (!stations.length) {
+                    stations = cache.fallbackStationsData;
+                    console.log('[VERCEL-LOG] Utilizzo dati di fallback per stazioni');
+                }
+                
+                if (!prices.length) {
+                    prices = cache.fallbackPricesData;
+                    console.log('[VERCEL-LOG] Utilizzo dati di fallback per prezzi');
                 }
             }
 
             // Verifica se abbiamo ottenuto dati validi
             if (stations?.length && prices?.length) {
-                console.log(`Download completato: ${stations.length} stazioni, ${prices.length} prezzi`);
+                console.log(`[VERCEL-LOG] Download completato: ${stations.length} stazioni, ${prices.length} prezzi`);
                 
                 // Se non abbiamo un slice di prima riga sui dati di fallback
                 if (stations !== cache.fallbackStationsData) {
@@ -351,30 +355,30 @@ async function updateDataIfNeeded() {
                         station.ID = '999' + station.ID.toString();
                         return station;
                     });
-                    console.log(`Salvate ${cache.chargeStationsData.length} stazioni di ricarica nella cache`);
+                    console.log(`[VERCEL-LOG] Salvate ${cache.chargeStationsData.length} stazioni di ricarica nella cache`);
                 } else {
                     cache.chargeStationsData = [];
                 }
 
                 cache.lastUpdate = Date.now();
-                console.log('Dati aggiornati con successo');
+                console.log('[VERCEL-LOG] Dati aggiornati con successo');
             } else {
-                console.error('Non è stato possibile ottenere dati completi: stazioni=' + 
+                console.error('[VERCEL-LOG] Non è stato possibile ottenere dati completi: stazioni=' + 
                     (stations?.length || 0) + ', prezzi=' + (prices?.length || 0));
                 
                 // Mantieni i dati precedenti se disponibili o usa il fallback
                 if (!cache.stationsData || cache.stationsData.length === 0) {
                     cache.stationsData = cache.fallbackStationsData;
-                    console.log('Utilizzati dati stazioni di fallback');
+                    console.log('[VERCEL-LOG] Utilizzati dati stazioni di fallback');
                 }
                 if (!cache.pricesData || cache.pricesData.length === 0) {
                     cache.pricesData = cache.fallbackPricesData;
-                    console.log('Utilizzati dati prezzi di fallback');
+                    console.log('[VERCEL-LOG] Utilizzati dati prezzi di fallback');
                 }
                 if (!cache.chargeStationsData) cache.chargeStationsData = [];
             }
         } catch (error) {
-            console.error('Errore generale aggiornamento:', error.message);
+            console.error('[VERCEL-LOG] Errore generale aggiornamento:', error.message);
             // Assicurati che la cache abbia almeno array vuoti per evitare errori
             if (!cache.stationsData) cache.stationsData = cache.fallbackStationsData;
             if (!cache.pricesData) cache.pricesData = cache.fallbackPricesData;
