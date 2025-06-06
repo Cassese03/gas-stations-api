@@ -46,7 +46,6 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
 }
 
 async function downloadAndParseCSV(url) {
-    // Aggiungi un timeout esplicito per le richieste
     const timeout = 15000; // 15 secondi di timeout
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeout);
@@ -109,26 +108,36 @@ async function downloadAndParseCSV(url) {
         });
     } catch (error) {
         clearTimeout(timeoutId);
-        console.error('Download error:', error.message);
-        
-        // In caso di errore, ritorna un array vuoto invece di lanciare un'eccezione
-        // per evitare che tutto il processo fallisca
-        console.log('Ritorno array vuoto a causa di errore download');
+
+        if (error.name === 'AbortError') {
+            console.error('Errore: La richiesta è stata interrotta (timeout o abort manuale)');
+        } else {
+            console.error('Download error:', error.message);
+        }
+
+        // Ritorna un array vuoto per evitare che il processo fallisca
         return [];
     }
 }
 
 // Nuova funzione per scaricare dati JSON dalle stazioni di ricarica elettrica
 async function downloadChargeStationsData(url) {
+    const timeout = 15000; // 15 secondi di timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+
     try {
         console.log('Scaricamento dati stazioni di ricarica...');
         const response = await fetch(url, {
             method: 'GET',
             headers: {
                 'Accept': 'application/json',
-                'Content-Type': 'application/json'
-            }
+                'Content-Type': 'application/json',
+            },
+            signal: controller.signal
         });
+
+        clearTimeout(timeoutId);
 
         if (!response.ok) {
             throw new Error(`Errore API: ${response.status} ${response.statusText}`);
@@ -138,8 +147,16 @@ async function downloadChargeStationsData(url) {
         console.log(`Scaricate ${data.length} stazioni di ricarica`);
         return data;
     } catch (error) {
-        console.error('Errore scaricamento stazioni di ricarica:', error.message);
-        throw error;
+        clearTimeout(timeoutId);
+
+        if (error.name === 'AbortError') {
+            console.error('Errore: La richiesta è stata interrotta (timeout o abort manuale)');
+        } else {
+            console.error('Errore scaricamento stazioni di ricarica:', error.message);
+        }
+
+        // Ritorna un array vuoto per evitare che il processo fallisca
+        return [];
     }
 }
 
