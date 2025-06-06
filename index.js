@@ -46,13 +46,41 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
 }
 
 async function downloadAndParseCSV(url) {
+    // Aggiungi un timeout esplicito per le richieste
+    const timeout = 15000; // 15 secondi di timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    
     try {
-        const response = await fetch(url, {
+        console.log(`Tentativo download da ${url}`);
+        
+        // Controllo se l'URL è quello problematico del MISE e provo URL alternativi
+        let urlToUse = url;
+        if (url.includes('mise.gov.it')) {
+            // Prova URL alternativi dal ministero (MIMIT è il nuovo nome del MISE)
+            if (url.includes('anagrafica_impianti_attivi.csv')) {
+                console.log('Utilizzo URL alternativo per anagrafica');
+                urlToUse = 'https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv';
+            } else if (url.includes('prezzo_alle_8.csv')) {
+                console.log('Utilizzo URL alternativo per prezzi');
+                urlToUse = 'https://www.mimit.gov.it/images/exportCSV/prezzo_alle_8.csv';
+            }
+        }
+        
+        const response = await fetch(urlToUse, {
             method: 'GET',
             headers: {
-                'Accept': 'text/csv,application/csv'
-            }
+                'Accept': 'text/csv,application/csv',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            },
+            signal: controller.signal
         });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+            throw new Error(`Risposta HTTP non valida: ${response.status} ${response.statusText}`);
+        }
 
         return new Promise((resolve, reject) => {
             const results = [];
@@ -70,12 +98,23 @@ async function downloadAndParseCSV(url) {
                         isFirstRow = false;
                     }
                 })
-                .on('end', () => resolve(results))
-                .on('error', (error) => reject(error));
+                .on('end', () => {
+                    console.log(`Download completato con successo: ${results.length} righe`);
+                    resolve(results);
+                })
+                .on('error', (error) => {
+                    console.error(`Errore parsing CSV: ${error.message}`);
+                    reject(error);
+                });
         });
     } catch (error) {
+        clearTimeout(timeoutId);
         console.error('Download error:', error.message);
-        throw error;
+        
+        // In caso di errore, ritorna un array vuoto invece di lanciare un'eccezione
+        // per evitare che tutto il processo fallisca
+        console.log('Ritorno array vuoto a causa di errore download');
+        return [];
     }
 }
 
@@ -112,14 +151,52 @@ async function updateDataIfNeeded() {
         try {
             console.log('Aggiornamento dati...');
 
-            // Ottieni tutti i dati in parallelo
-            const [stations, prices, chargeStations] = await Promise.all([
-                downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv'),
-                downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/prezzo_alle_8.csv'),
-                downloadChargeStationsData('https://api.openchargemap.io/v3/poi/?output=json&countrycode=IT&key=65923063-f5a4-43cd-8ef9-3c1d64195d93&maxresults=1000')
-            ]);
+            // Aggiungi gestione degli errori migliorata
+            let stations = [], prices = [], chargeStations = [];
+            
+            try {
+                // Primo tentativo con URL mimit.gov.it
+                [stations, prices, chargeStations] = await Promise.all([
+                    downloadAndParseCSV('https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv'),
+                    downloadAndParseCSV('https://www.mimit.gov.it/images/exportCSV/prezzo_alle_8.csv'),
+                    downloadChargeStationsData('https://api.openchargemap.io/v3/poi/?output=json&countrycode=IT&key=65923063-f5a4-43cd-8ef9-3c1d64195d93&maxresults=1000')
+                ]);
+                
+                // Se non abbiamo ottenuto dati, proviamo con gli URL originali mise.gov.it
+                if (!stations.length || !prices.length) {
+                    console.log('Primo tentativo fallito, provo URLs alternativi...');
+                    [stations, prices] = await Promise.all([
+                        downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv'),
+                        downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/prezzo_alle_8.csv')
+                    ]);
+                }
+            } catch (downloadError) {
+                console.error('Errore durante il download parallelo:', downloadError.message);
+                
+                // Proviamo a scaricare i file uno alla volta per isolare il problema
+                console.log('Tentativo download sequenziale...');
+                try {
+                    stations = await downloadAndParseCSV('https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv');
+                } catch (e) {
+                    console.error('Errore download stazioni:', e.message);
+                }
+                
+                try {
+                    prices = await downloadAndParseCSV('https://www.mimit.gov.it/images/exportCSV/prezzo_alle_8.csv');
+                } catch (e) {
+                    console.error('Errore download prezzi:', e.message);
+                }
+                
+                try {
+                    chargeStations = await downloadChargeStationsData('https://api.openchargemap.io/v3/poi/?output=json&countrycode=IT&key=65923063-f5a4-43cd-8ef9-3c1d64195d93&maxresults=1000');
+                } catch (e) {
+                    console.error('Errore download stazioni ricarica:', e.message);
+                }
+            }
 
+            // Verifica se abbiamo ottenuto dati validi
             if (stations?.length && prices?.length) {
+                console.log(`Download completato: ${stations.length} stazioni, ${prices.length} prezzi`);
                 cache.stationsData = stations.slice(1);
                 cache.pricesData = prices.slice(1);
 
@@ -137,9 +214,17 @@ async function updateDataIfNeeded() {
 
                 cache.lastUpdate = Date.now();
                 console.log('Dati aggiornati con successo');
+            } else {
+                console.error('Non è stato possibile ottenere dati completi: stazioni='+stations.length+', prezzi='+prices.length);
+                
+                // Mantieni i dati precedenti se disponibili
+                if (!cache.stationsData) cache.stationsData = [];
+                if (!cache.pricesData) cache.pricesData = [];
+                if (!cache.chargeStationsData) cache.chargeStationsData = [];
             }
         } catch (error) {
-            console.error('Errore aggiornamento:', error.message);
+            console.error('Errore generale aggiornamento:', error.message);
+            // Assicurati che la cache abbia almeno array vuoti per evitare errori
             if (!cache.stationsData) cache.stationsData = [];
             if (!cache.pricesData) cache.pricesData = [];
             if (!cache.chargeStationsData) cache.chargeStationsData = [];
