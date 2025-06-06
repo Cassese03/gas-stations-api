@@ -3,6 +3,8 @@ const csv = require('csv-parser');
 const fetch = require('node-fetch');
 const { Readable } = require('stream');
 const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 
@@ -45,37 +47,60 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
     return R * c;
 }
 
-async function downloadAndParseCSV(url) {
+// Rilevamento dell'ambiente Vercel
+const isVercel = process.env.VERCEL === '1' || process.env.VERCEL_ENV;
+
+// Percorsi dei file CSV locali - semplificati per lavorare meglio con GitHub Actions
+const LOCAL_DATA_DIR = path.join(__dirname, 'public', 'data');
+const STATIONS_CSV_FILE = path.join(LOCAL_DATA_DIR, 'anagrafica_impianti_attivi.csv');
+const PRICES_CSV_FILE = path.join(LOCAL_DATA_DIR, 'prezzo_alle_8.csv');
+
+// Funzione per leggere i file CSV locali - mantiene la stessa logica
+async function readLocalCSV(filePath) {
+    console.log(`Lettura file locale: ${filePath}`);
+    
+    return new Promise((resolve, reject) => {
+        const results = [];
+        let isFirstRow = true;
+        
+        // Verifica se il file esiste
+        if (!fs.existsSync(filePath)) {
+            console.error(`File non trovato: ${filePath}`);
+            return reject(new Error(`File non trovato: ${filePath}`));
+        }
+        
+        fs.createReadStream(filePath)
+            .pipe(csv({
+                separator: ';',
+                mapHeaders: ({ header, index }) => `_${index}`
+            }))
+            .on('data', (data) => {
+                if (!isFirstRow) {
+                    results.push(data);
+                } else {
+                    isFirstRow = false;
+                }
+            })
+            .on('end', () => {
+                console.log(`Lettura completata: ${results.length} record letti da ${filePath}`);
+                resolve(results);
+            })
+            .on('error', (error) => {
+                console.error(`Errore nella lettura del file ${filePath}:`, error);
+                reject(error);
+            });
+    });
+}
+
+// Funzione semplificata - ora legge solo i file locali
+async function loadCSVData(type) {
     try {
-        const response = await fetch(url, {
-            method: 'GET',
-            headers: {
-                'Accept': 'text/csv,application/csv'
-            }
-        });
-
-        return new Promise((resolve, reject) => {
-            const results = [];
-            let isFirstRow = true;
-
-            Readable.from(response.body)
-                .pipe(csv({
-                    separator: ';',
-                    mapHeaders: ({ header, index }) => `_${index}` // Questo trasforma gli header in _0, _1, _2, ecc.
-                }))
-                .on('data', (data) => {
-                    if (!isFirstRow) {
-                        results.push(data);
-                    } else {
-                        isFirstRow = false;
-                    }
-                })
-                .on('end', () => resolve(results))
-                .on('error', (error) => reject(error));
-        });
+        const filePath = type === 'stations' ? STATIONS_CSV_FILE : PRICES_CSV_FILE;
+        console.log(`Caricamento dati da ${filePath}`);
+        return await readLocalCSV(filePath);
     } catch (error) {
-        console.error('Download error:', error.message);
-        throw error;
+        console.error(`Errore nel caricamento dei dati ${type}:`, error);
+        return [];
     }
 }
 
@@ -110,18 +135,23 @@ async function updateDataIfNeeded() {
 
     if (!cache.lastUpdate || (Date.now() - cache.lastUpdate) > HOURS_23) {
         try {
-            console.log('Aggiornamento dati...');
+            console.log('Aggiornamento dati da file locali...');
 
-            // Ottieni tutti i dati in parallelo
-            const [stations, prices, chargeStations] = await Promise.all([
-                downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv'),
-                downloadAndParseCSV('https://www.mise.gov.it/images/exportCSV/prezzo_alle_8.csv'),
-                downloadChargeStationsData('https://api.openchargemap.io/v3/poi/?output=json&countrycode=IT&key=65923063-f5a4-43cd-8ef9-3c1d64195d93&maxresults=1000')
-            ]);
+            // Carica i dati dai file locali - semplificato rispetto alla versione precedente
+            const stations = await loadCSVData('stations');
+            const prices = await loadCSVData('prices');
+            
+            // Prova a scaricare le stazioni di ricarica da API esterna
+            let chargeStations = [];
+            try {
+                chargeStations = await downloadChargeStationsData('https://api.openchargemap.io/v3/poi/?output=json&countrycode=IT&key=65923063-f5a4-43cd-8ef9-3c1d64195d93&maxresults=1000');
+            } catch (chargeError) {
+                console.error('Errore nel download delle stazioni di ricarica:', chargeError);
+            }
 
             if (stations?.length && prices?.length) {
-                cache.stationsData = stations.slice(1);
-                cache.pricesData = prices.slice(1);
+                cache.stationsData = stations;
+                cache.pricesData = prices;
 
                 // Trasforma i dati delle stazioni di ricarica con ID prefissati
                 if (chargeStations?.length) {
@@ -137,6 +167,11 @@ async function updateDataIfNeeded() {
 
                 cache.lastUpdate = Date.now();
                 console.log('Dati aggiornati con successo');
+            } else {
+                console.error('Dati non disponibili dai file locali');
+                if (!cache.stationsData) cache.stationsData = [];
+                if (!cache.pricesData) cache.pricesData = [];
+                if (!cache.chargeStationsData) cache.chargeStationsData = [];
             }
         } catch (error) {
             console.error('Errore aggiornamento:', error.message);
@@ -219,72 +254,6 @@ app.get('/gas-stations', async (req, res) => {
 
     // 2. Ottieni le stazioni elettriche
     let electricStations = [];
-    // if (cache.chargeStationsData) {
-    //     electricStations = cache.chargeStationsData
-    //         .filter(station => {
-    //             if (!station.AddressInfo || !station.AddressInfo.Latitude || !station.AddressInfo.Longitude) {
-    //                 return false;
-    //             }
-
-    //             const stationLat = station.AddressInfo.Latitude;
-    //             const stationLng = station.AddressInfo.Longitude;
-    //             const dist = calculateDistance(userLat, userLng, stationLat, stationLng);
-    //             station._distance = dist;
-    //             return dist <= maxDistance;
-    //         })
-    //         .map(station => {
-    //             const avgPower = station.Connections.reduce((sum, conn) => sum + (conn.PowerKW || 0), 0) /
-    //                 (station.Connections.length || 1);
-
-    //             // Aggiungi il numero di colonnine disponibili
-    //             const numBays = station.NumberOfPoints || station.Connections.length || 1;
-
-    //             return {
-    //                 id_stazione: station.ID.toString(),
-    //                 tipo_stazione: `Elettrica`,
-    //                 bandiera: station.OperatorInfo?.Title || "N/D",
-    //                 dettagli_stazione: {
-    //                     gestore: station.OperatorInfo?.Title || "N/D",
-    //                     tipo: "Elettrica",
-    //                     nome: (station.AddressInfo.Title || "Stazione di ricarica") + ` (${numBays} colonnine)`
-    //                 },
-    //                 indirizzo: {
-    //                     via: station.AddressInfo.AddressLine1 || "N/D",
-    //                     comune: station.AddressInfo.Town || "N/D",
-    //                     provincia: station.AddressInfo.StateOrProvince || "N/D"
-    //                 },
-    //                 maps: {
-    //                     lat: station.AddressInfo.Latitude,
-    //                     lon: station.AddressInfo.Longitude
-    //                 },
-    //                 distanza: parseFloat(station._distance.toFixed(2)),
-    //                 prezzi_carburanti: station.Connections.map(conn => {
-    //                     const potenzaKW = conn.PowerKW || avgPower || 0;
-    //                     let stimaPrezzo = null;
-
-    //                     if (potenzaKW > 0) {
-    //                         // Stima basata su tariffe medie in Italia
-    //                         if (potenzaKW < 11) stimaPrezzo = 0.40; // AC lenta
-    //                         else if (potenzaKW < 50) stimaPrezzo = 0.50; // AC veloce
-    //                         else if (potenzaKW < 100) stimaPrezzo = 0.60; // DC veloce
-    //                         else stimaPrezzo = 0.70; // DC ultra veloce
-    //                     }
-
-    //                     return {
-    //                         tipo: conn.ConnectionType?.Title || "Generico",
-    //                         potenza_kw: parseFloat(potenzaKW.toFixed(2)),
-    //                         prezzo: stimaPrezzo, // €/kWh stimato
-    //                         unita_misura: "€/kWh (stimato)",
-    //                         self_service: true,
-    //                         ultimo_aggiornamento: station.DateLastStatusUpdate ?
-    //                             new Date(station.DateLastStatusUpdate).toISOString().split('T')[0] :
-    //                             new Date().toISOString().split('T')[0]
-    //                     };
-    //                 })
-    //             };
-    //         });
-    // }
-    // 3. Ottieni le stazioni di ricarica da Google Places API
     let googleStations = [];
     try {
         const googleApiKey = 'AIzaSyCoiskCn8rH89TSLvX9rB6yTQO9c0dCcvM'; // Sostituisci con la tua chiave API
@@ -314,16 +283,12 @@ app.get('/gas-stations', async (req, res) => {
 
                 }
             }),
-        });// Termina l'esecuzione del programma come farebbe dd() in PHP
+        });
 
         if (response.status === 200) {
             const googleData = await response.json();
             if (googleData.places.length > 0) {
                 googleStations = googleData.places.map(async station => {
-                    //console.log('station:', station);
-
-                    //process.exit(0); Termina l'esecuzione del programma come farebbe dd() in PHP
-
                     const avgPower = response.evChargeOptions?.connectorAggregation.maxChargeRateKw || 50; // Usa la potenza media se disponibile, altrimenti 50 kW
                     let stimaPrezzo = null;
 
@@ -376,13 +341,9 @@ app.get('/gas-stations', async (req, res) => {
     googleStations = await Promise.all(googleStations);
 
     // Unisci le stazioni di Google con le altre
-    const allStations = [...gasolineStations/*, ...electricStations,*/, ...googleStations]
+    const allStations = [...gasolineStations, ...googleStations]
         .sort((a, b) => a.distanza - b.distanza)
         .slice(0, parseInt(distance * 4));
-    // // 3. Unisci le stazioni e ordina per distanza
-    // const allStations = [...gasolineStations, ...electricStations]
-    //     .sort((a, b) => a.distanza - b.distanza)
-    //     .slice(0, parseInt(distance * 4));
 
     res.json({
         status: 'success',
@@ -447,8 +408,6 @@ app.get('/health', async (req, res) => {
 
 // Endpoint per le stazioni di ricarica elettrica
 app.get('/charge-stations', async (req, res) => {
-    //await updateDataIfNeeded();
-
     const { lat, lng, distance } = req.query;
 
     if (!lat || !lng || !distance) {
@@ -458,17 +417,10 @@ app.get('/charge-stations', async (req, res) => {
         });
     }
 
-    // if (!cache.chargeStationsData) {
-    //     return res.status(503).json({
-    //         status: 'error',
-    //         message: 'Dati non ancora disponibili'
-    //     });
-    // }
-
     const userLat = parseFloat(lat);
     const userLng = parseFloat(lng);
     const maxDistance = parseFloat(distance);
-let googleStations = [];
+    let googleStations = [];
     try {
         const googleApiKey = 'AIzaSyCoiskCn8rH89TSLvX9rB6yTQO9c0dCcvM'; // Sostituisci con la tua chiave API
         const googleApiUrl = 'https://places.googleapis.com/v1/places:searchText?languageCode=it';
@@ -497,51 +449,12 @@ let googleStations = [];
 
                 }
             }),
-        });// Termina l'esecuzione del programma come farebbe dd() in PHP
+        });
 
         if (response.status === 200) {
             const googleData = await response.json();
             if (googleData.places.length > 0) {
                 googleStations = googleData.places.map(async station => {
-                    //console.log('station:', station);
-
-                    //process.exit(0); Termina l'esecuzione del programma come farebbe dd() in PHP
-                    // Recupera informazioni dettagliate per ogni stazione da Google Places API
-                    //         const placeDetailsUrl = `https://places.googleapis.com/v1/places/${station.place_id}?fields=id,displayName,evChargeOptions,addressDescriptor&key=${googleApiKey}`;
-                    //         const placeDetailsResponse = await fetch(placeDetailsUrl);
-
-                    //         let placeDetails = {};
-                    //         if (placeDetailsResponse.ok) {
-                    //             placeDetails = await placeDetailsResponse.json();
-                    //         } else {
-                    //             console.error(`Errore nel recupero dei dettagli per la stazione ${station.place_id}:`, placeDetailsResponse.statusText);
-                    //         }
-
-
-
-                    //                     const potenzaKW = conn.PowerKW || avgPower || 0;
-                    //                     let stimaPrezzo = null;
-
-                    //                     if (potenzaKW > 0) {
-                    //                         // Stima basata su tariffe medie in Italia
-                    //                         if (potenzaKW < 11) stimaPrezzo = 0.40; // AC lenta
-                    //                         else if (potenzaKW < 50) stimaPrezzo = 0.50; // AC veloce
-                    //                         else if (potenzaKW < 100) stimaPrezzo = 0.60; // DC veloce
-                    //                         else stimaPrezzo = 0.70; // DC ultra veloce
-                    //                     }
-
-                    //                     return {
-                    //                         tipo: conn.ConnectionType?.Title || "Generico",
-                    //                         potenza_kw: parseFloat(potenzaKW.toFixed(2)),
-                    //                         prezzo: stimaPrezzo, // €/kWh stimato
-                    //                         unita_misura: "€/kWh (stimato)",
-                    //                         self_service: true,
-                    //                         ultimo_aggiornamento: station.DateLastStatusUpdate ?
-                    //                             new Date(station.DateLastStatusUpdate).toISOString().split('T')[0] :
-                    //                             new Date().toISOString().split('T')[0]
-                    //                     };
-                    //                 
-
                     const avgPower = response.evChargeOptions?.connectorAggregation.maxChargeRateKw || 50; // Usa la potenza media se disponibile, altrimenti 50 kW
                     let stimaPrezzo = null;
 
@@ -594,69 +507,6 @@ let googleStations = [];
     googleStations = await Promise.all(googleStations
         .sort((a, b) => a.distanza - b.distanza)
         .slice(0, parseInt(distance * 4)));
-    // Ottieni solo le stazioni elettriche
-    /*let electricStations = cache.chargeStationsData
-        .filter(station => {
-            if (!station.AddressInfo || !station.AddressInfo.Latitude || !station.AddressInfo.Longitude) {
-                return false;
-            }
-
-            const stationLat = station.AddressInfo.Latitude;
-            const stationLng = station.AddressInfo.Longitude;
-            const dist = calculateDistance(userLat, userLng, stationLat, stationLng);
-            station._distance = dist;
-            return dist <= maxDistance;
-        })
-        .map(station => {
-            const avgPower = station.Connections.reduce((sum, conn) => sum + (conn.PowerKW || 0), 0) /
-                (station.Connections.length || 1);
-
-            const numBays = station.NumberOfPoints || station.Connections.length || 1;
-
-            return {
-                id_stazione: station.ID.toString(),
-                tipo_stazione: 'Elettrica',
-                bandiera: station.OperatorInfo?.Title || "N/D",
-                dettagli_stazione: {
-                    gestore: station.OperatorInfo?.Title || "N/D",
-                    tipo: "Elettrica",
-                    nome: (station.AddressInfo.Title || "Stazione di ricarica") + ` (${numBays} colonnine)`
-                },
-                indirizzo: {
-                    via: station.AddressInfo.AddressLine1 || "N/D",
-                    comune: station.AddressInfo.Town || "N/D",
-                    provincia: station.AddressInfo.StateOrProvince || "N/D"
-                },
-                maps: {
-                    lat: station.AddressInfo.Latitude,
-                    lon: station.AddressInfo.Longitude
-                },
-                distanza: parseFloat(station._distance.toFixed(2)),
-                prezzi_carburanti: station.Connections.map(conn => {
-                    const potenzaKW = conn.PowerKW || avgPower || 0;
-                    let stimaPrezzo = null;
-
-                    if (potenzaKW > 0) {
-                        if (potenzaKW < 11) stimaPrezzo = 0.40;
-                        else if (potenzaKW < 50) stimaPrezzo = 0.50;
-                        else if (potenzaKW < 100) stimaPrezzo = 0.60;
-                        else stimaPrezzo = 0.70;
-                    }
-
-                    return {
-                        tipo: conn.ConnectionType?.Title || "Generico",
-                        prezzo: stimaPrezzo,
-                        self_service: true,
-                        ultimo_aggiornamento: station.DateLastStatusUpdate ?
-                            new Date(station.DateLastStatusUpdate).toISOString().split('T')[0] :
-                            new Date().toISOString().split('T')[0]
-                    };
-                })
-            };
-        })
-        .sort((a, b) => a.distanza - b.distanza)
-        .slice(0, parseInt(distance * 4));
-        */
 
     res.json({
         status: 'success',
@@ -667,6 +517,54 @@ let googleStations = [];
     });
 });
 
+// Aggiungi un endpoint per visualizzare informazioni sui file locali
+app.get('/file-info', (req, res) => {
+    try {
+        const stationsExists = fs.existsSync(STATIONS_CSV_FILE);
+        const pricesExists = fs.existsSync(PRICES_CSV_FILE);
+        
+        let stationsStats = null;
+        let pricesStats = null;
+        
+        if (stationsExists) {
+            stationsStats = fs.statSync(STATIONS_CSV_FILE);
+        }
+        
+        if (pricesExists) {
+            pricesStats = fs.statSync(PRICES_CSV_FILE);
+        }
+        
+        res.json({
+            status: 'success',
+            files: {
+                stations: {
+                    exists: stationsExists,
+                    path: STATIONS_CSV_FILE,
+                    size: stationsStats ? `${(stationsStats.size / (1024 * 1024)).toFixed(2)} MB` : null,
+                    lastModified: stationsStats ? new Date(stationsStats.mtime).toISOString() : null
+                },
+                prices: {
+                    exists: pricesExists,
+                    path: PRICES_CSV_FILE,
+                    size: pricesStats ? `${(pricesStats.size / (1024 * 1024)).toFixed(2)} MB` : null,
+                    lastModified: pricesStats ? new Date(pricesStats.mtime).toISOString() : null
+                }
+            },
+            cache: {
+                lastUpdate: cache.lastUpdate ? new Date(cache.lastUpdate).toISOString() : null,
+                stationsCount: cache.stationsData?.length || 0,
+                pricesCount: cache.pricesData?.length || 0
+            }
+        });
+    } catch (error) {
+        console.error('Errore durante la lettura delle informazioni sui file:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Errore durante la lettura delle informazioni sui file',
+            error: error.message
+        });
+    }
+});
 
 // Configurazione della porta
 const PORT = process.env.PORT || 3000;
