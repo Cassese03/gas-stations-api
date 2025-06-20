@@ -566,6 +566,100 @@ app.get('/file-info', (req, res) => {
     }
 });
 
+// Aggiungi un nuovo endpoint /gas-stations-by-fuel che accetta i parametri lat, lng, distance e TipoFuel, e restituisce solo le stazioni di benzina che hanno almeno un prezzo per quel tipo di carburante (TipoFuel). Il filtro viene applicato sui prezzi_carburanti.
+app.get('/gas-stations-by-fuel', async (req, res) => {
+    await updateDataIfNeeded();
+
+    const { lat, lng, distance, TipoFuel } = req.query;
+
+    if (!lat || !lng || !distance || !TipoFuel) {
+        return res.status(400).json({
+            status: 'error',
+            message: 'Parametri lat, lng, distance e TipoFuel sono richiesti'
+        });
+    }
+
+    // Se il tipo fuel è "Elettrico", inoltra la richiesta all'endpoint /charge-stations
+    if (TipoFuel.trim().toUpperCase() === 'ELETTRICA') {
+        // Simula una chiamata interna all'handler /charge-stations
+        req.query.TipoFuel = undefined; // Rimuovi TipoFuel per evitare conflitti
+        // Inoltra la richiesta a /charge-stations mantenendo i parametri lat, lng, distance
+        req.url = `/charge-stations?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}&distance=${encodeURIComponent(distance)}`;
+        return app._router.handle(req, res, () => {});
+    }
+
+    if (!cache.stationsData || !cache.pricesData) {
+        return res.status(503).json({
+            status: 'error',
+            message: 'Dati non ancora disponibili'
+        });
+    }
+
+    const userLat = parseFloat(lat);
+    const userLng = parseFloat(lng);
+    const maxDistance = parseFloat(distance);
+
+    // 1. Ottieni le stazioni di benzina filtrate per TipoFuel
+    let gasolineStations = cache.stationsData
+        .filter(station => {
+            const stationLat = parseFloat(station['_8']);
+            const stationLng = parseFloat(station['_9']);
+
+            if (isNaN(stationLat) || isNaN(stationLng)) {
+                return false;
+            }
+
+            const dist = calculateDistance(userLat, userLng, stationLat, stationLng);
+            station._distance = dist;
+            return dist <= maxDistance;
+        })
+        .map(station => {
+            const stationId = station['_0'];
+            const stationPrices = cache.pricesData.filter(p => p['_0'] === stationId && p['_1'].trim().toUpperCase() == TipoFuel.trim().toUpperCase());
+
+            return {
+                id_stazione: stationId,
+                tipo_stazione: 'Benzina',
+                bandiera: station['_2'],
+                dettagli_stazione: {
+                    gestore: station['_1'],
+                    tipo: station['_3'],
+                    nome: station['_4']
+                },
+                indirizzo: {
+                    via: station['_5'],
+                    comune: station['_6'],
+                    provincia: station['_7']
+                },
+                maps: {
+                    lat: parseFloat(station['_8']),
+                    lon: parseFloat(station['_9'])
+                },
+                distanza: Number(station._distance.toFixed(2)),
+                prezzi_carburanti: stationPrices.map(price => ({
+                    tipo: price['_1'],
+                    prezzo: parseFloat(price['_2']?.replace(',', '.')) || null,
+                    self_service: price['_3'] === '1',
+                    ultimo_aggiornamento: price['_4']
+                }))
+            };
+        })
+        .filter(station => station.prezzi_carburanti.length > 0); // Solo stazioni con almeno un prezzo per quel TipoFuel
+
+    // Ordina per distanza e limita il numero di risultati
+    const allStations = gasolineStations
+        .sort((a, b) => a.distanza - b.distanza)
+        .slice(0, parseInt(distance * 4));
+
+    res.json({
+        status: 'success',
+        timestamp: new Date().toISOString(),
+        totale_stazioni: cache.stationsData.length,
+        stazioni_trovate: allStations.length,
+        stations: allStations
+    });
+});
+
 // Configurazione della porta
 const PORT = process.env.PORT || 3000;
 
