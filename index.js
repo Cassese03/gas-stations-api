@@ -641,33 +641,48 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
 
     // Debug stazione specifica
     const targetId = '45672';
-    console.log('[DEBUG] Dati stazione 45672:', {
-        prezziTrovati: pricesMap.has(targetId),
-        numeroPrezziBenzina: pricesMap.get(targetId)?.filter(p => p['_1']?.trim().toUpperCase() === TipoFuel.trim().toUpperCase()).length || 0,
-        tuttiPrezzi: pricesMap.get(targetId) || []
-    });
+    const targetStation = cache.stationsData.find(s => normalizeId(s['_0']) === targetId);
+    if (targetStation) {
+        const targetLat = parseFloat(targetStation['_8']?.toString().replace(',', '.'));
+        const targetLng = parseFloat(targetStation['_9']?.toString().replace(',', '.'));
+        const targetDist = calculateDistance(userLat, userLng, targetLat, targetLng);
+        
+        console.log('[DEBUG] Dettagli stazione 45672:', {
+            coordinate: { lat: targetLat, lng: targetLng },
+            distanza: targetDist,
+            entroRaggio: targetDist <= maxDistance,
+            prezzi: pricesMap.get(targetId) || []
+        });
+    }
 
     let gasolineStations = cache.stationsData
         .map(station => {
             const stationId = normalizeId(station['_0']);
             const stationPrices = pricesMap.get(stationId) || [];
             
-            if (stationId === targetId) {
-                console.log('[DEBUG] Elaborazione stazione 45672:', {
-                    stationId,
-                    foundPrices: stationPrices.length,
-                    station
-                });
-            }
-
+            // Pulisci e valida le coordinate
             const stationLat = parseFloat(station['_8']?.toString().replace(',', '.'));
             const stationLng = parseFloat(station['_9']?.toString().replace(',', '.'));
 
             if (isNaN(stationLat) || isNaN(stationLng)) {
+                console.log(`[DEBUG] Coordinate non valide per stazione ${stationId}:`, {
+                    lat: station['_8'],
+                    lng: station['_9']
+                });
                 return null;
             }
 
             const dist = calculateDistance(userLat, userLng, stationLat, stationLng);
+            
+            if (stationId === targetId) {
+                console.log('[DEBUG] Controllo distanza stazione 45672:', {
+                    coordinate: { lat: stationLat, lng: stationLng },
+                    distanza: dist,
+                    maxDistance,
+                    entroRaggio: dist <= maxDistance
+                });
+            }
+
             if (dist > maxDistance) {
                 return null;
             }
