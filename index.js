@@ -54,7 +54,7 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
     const distance = R * c;
 
     // Log per debug
-    if (distance <= 100) {
+    if (distance <= 50) {
         console.log('Calcolo distanza:', {
             da: {lat: lat1, lon: lon1},
             a: {lat: lat2, lon: lon2},
