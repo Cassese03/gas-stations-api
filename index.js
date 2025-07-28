@@ -594,8 +594,10 @@ app.get('/file-info', (req, res) => {
 // Aggiungi un nuovo endpoint /gas-stations-by-fuel che accetta i parametri lat, lng, distance e TipoFuel, e restituisce solo le stazioni di benzina che hanno almeno un prezzo per quel tipo di carburante (TipoFuel). Il filtro viene applicato sui prezzi_carburanti.
 app.get('/gas-stations-by-fuel', async (req, res) => {
     await updateDataIfNeeded();
+    console.log('\n[DEBUG] Inizio elaborazione gas-stations-by-fuel');
 
     const { lat, lng, distance, TipoFuel } = req.query;
+    console.log('[DEBUG] Query params:', { lat, lng, distance, TipoFuel });
 
     if (!lat || !lng || !distance || !TipoFuel) {
         return res.status(400).json({
@@ -624,60 +626,87 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
     const userLng = parseFloat(lng);
     const maxDistance = parseFloat(distance);
     
-    console.log('Ricerca stazioni intorno a:', { userLat, userLng, maxDistance, TipoFuel });
-    console.log(`Totale stazioni nel database: ${cache.stationsData.length}`);
+    console.log('[DEBUG] ==== ELABORAZIONE STAZIONE 45672 ====');
+    console.log('[DEBUG] Cerco la stazione nei dati...');
+    
+    // Trova e logga la stazione specifica prima del filtro
+    const station45672 = cache.stationsData.find(s => s['_0'] === '45672');
+    if (station45672) {
+        console.log('[DEBUG] Trovata stazione 45672:', station45672);
+    } else {
+        console.log('[DEBUG] Stazione 45672 non trovata nel database');
+    }
 
-    // 1. Prima filtra per distanza (più veloce)
+    // Trova e logga i prezzi per la stazione specifica
+    const prices45672 = cache.pricesData.filter(p => p['_0'] === '45672');
+    console.log('[DEBUG] Prezzi trovati per 45672:', prices45672);
+    
     let gasolineStations = cache.stationsData
         .map(station => {
-            const stationLat = parseFloat(station['_8']?.toString().replace(',', '.'));
-            const stationLng = parseFloat(station['_9']?.toString().replace(',', '.'));
             const stationId = station['_0'];
             
-            // Debug log spostato qui dopo il parsing delle coordinate
-            if(stationId === '45672' || stationId === 45672) {  // Controlla entrambi i tipi
-                console.log('Analisi stazione 45672:', {
-                    id: stationId,
-                    coordinate_raw: { lat: station['_8'], lng: station['_9'] },
-                    coordinate_parsed: { lat: stationLat, lng: stationLng },
-                    is_valid: !isNaN(stationLat) && !isNaN(stationLng)
+            // Verifica se è la stazione che ci interessa
+            const isTargetStation = stationId === '45672';
+            if (isTargetStation) {
+                console.log('[DEBUG] Processing stazione 45672');
+            }
+
+            const stationLat = parseFloat(station['_8']?.toString().replace(',', '.'));
+            const stationLng = parseFloat(station['_9']?.toString().replace(',', '.'));
+
+            if (isTargetStation) {
+                console.log('[DEBUG] Coordinate parsed:', {
+                    raw: { lat: station['_8'], lng: station['_9'] },
+                    parsed: { lat: stationLat, lng: stationLng }
                 });
             }
 
             if (isNaN(stationLat) || isNaN(stationLng)) {
+                if (isTargetStation) {
+                    console.log('[DEBUG] Coordinate non valide per 45672');
+                }
                 return null;
             }
 
             const dist = calculateDistance(userLat, userLng, stationLat, stationLng);
             
-            // Debug log per la distanza
-            if(stationId === '45672' || stationId === 45672) {
-                console.log('Distanza calcolata per 45672:', {
+            if (isTargetStation) {
+                console.log('[DEBUG] Distanza calcolata:', {
                     distanza: dist,
-                    max_distance: maxDistance,
-                    in_range: dist <= maxDistance
+                    maxDistance: maxDistance,
+                    inRange: dist <= maxDistance
                 });
             }
 
             if (dist > maxDistance) {
+                if (isTargetStation) {
+                    console.log('[DEBUG] Stazione 45672 fuori range');
+                }
                 return null;
             }
 
-            // 2. Solo per le stazioni vicine, cerca i prezzi del carburante richiesto
-            const stationPrices = cache.pricesData.filter(p => 
-                p['_0'] === stationId && 
-                p['_1']?.trim().toUpperCase() === TipoFuel.trim().toUpperCase()
-            );
+            const stationPrices = cache.pricesData.filter(p => {
+                const matches = p['_0'] === stationId && 
+                              p['_1']?.trim().toUpperCase() === TipoFuel.trim().toUpperCase();
+                
+                if (isTargetStation) {
+                    console.log('[DEBUG] Verifica prezzo:', {
+                        price: p,
+                        matches: matches
+                    });
+                }
+                
+                return matches;
+            });
 
-            // Debug log per i prezzi
-            if(stationId === '45672' || stationId === 45672) {
-                console.log('Prezzi trovati per 45672:', {
-                    n_prezzi: stationPrices.length,
-                    prezzi: stationPrices
-                });
+            if (isTargetStation) {
+                console.log('[DEBUG] Prezzi filtrati per 45672:', stationPrices);
             }
 
             if (stationPrices.length === 0) {
+                if (isTargetStation) {
+                    console.log('[DEBUG] Nessun prezzo trovato per 45672');
+                }
                 return null;
             }
 
@@ -711,7 +740,8 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
         .filter(station => station !== null)
         .sort((a, b) => a.distanza - b.distanza);
 
-    console.log(`Stazioni trovate: ${gasolineStations.length}`);
+    console.log('[DEBUG] Elaborazione completata');
+    console.log(`[DEBUG] Stazioni trovate: ${gasolineStations.length}`);
 
     res.json({
         status: 'success',
