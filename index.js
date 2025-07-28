@@ -624,68 +624,60 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
     const userLng = parseFloat(lng);
     const maxDistance = parseFloat(distance);
 
-    console.log('Debug - Parametri ricerca:', { userLat, userLng, maxDistance, TipoFuel });
-    console.log('Debug - Cache size:', { 
-        stations: cache.stationsData.length,
-        prices: cache.pricesData.length
-    });
+    console.log('Ricerca stazioni intorno a:', { userLat, userLng, maxDistance, TipoFuel });
 
-    // Prima filtra i prezzi per il tipo di carburante
-    const validPrices = cache.pricesData.filter(price => {
-        const isValid = price['_1']?.trim().toUpperCase() === TipoFuel.trim().toUpperCase();
-        if (isValid) {
-            console.log('Debug - Prezzo valido trovato:', {
-                stationId: price['_0'],
-                tipo: price['_1'],
-                prezzo: price['_2']
-            });
-        }
-        return isValid;
-    });
-
-    console.log('Debug - Prezzi validi trovati:', validPrices.length);
-
-    // Poi trova le stazioni corrispondenti
+    // 1. Ottieni le stazioni di benzina filtrate per TipoFuel
     let gasolineStations = cache.stationsData
         .filter(station => {
-            // Prima verifica se la stazione ha prezzi validi
-            const hasPrices = validPrices.some(price => price['_0'] === station['_0']);
-            if (!hasPrices) return false;
-
-            // Poi verifica la distanza
+            // Conversione sicura delle coordinate
             const stationLat = parseFloat((station['_8'] || '').toString().replace(',', '.'));
             const stationLng = parseFloat((station['_9'] || '').toString().replace(',', '.'));
+            
+            // Log per debug
+            if (station['_6'] === 'SCALEA') {
+                console.log('Analisi stazione Scalea:', {
+                    id: station['_0'],
+                    nome: station['_4'],
+                    lat_orig: station['_8'],
+                    lng_orig: station['_9'],
+                    lat_parsed: stationLat,
+                    lng_parsed: stationLng
+                });
+            }
 
             if (isNaN(stationLat) || isNaN(stationLng)) {
-                console.log('Debug - Coordinate non valide:', {
-                    stationId: station['_0'],
-                    lat: station['_8'],
-                    lng: station['_9']
-                });
                 return false;
             }
 
             const dist = calculateDistance(userLat, userLng, stationLat, stationLng);
+            
+            // Log distanza per debug
+            if (station['_6'] === 'SCALEA') {
+                console.log('Distanza calcolata per Scalea:', {
+                    dist,
+                    maxDistance,
+                    inRange: dist <= maxDistance
+                });
+            }
+
             station._distance = dist;
-
-            console.log('Debug - Distanza calcolata:', {
-                stationId: station['_0'],
-                nome: station['_4'],
-                distanza: dist,
-                inRange: dist <= maxDistance
-            });
-
             return dist <= maxDistance;
         })
         .map(station => {
-            const stationPrices = validPrices
-                .filter(p => p['_0'] === station['_0'])
-                .map(price => ({
-                    tipo: price['_1'],
-                    prezzo: parseFloat((price['_2'] || '0').toString().replace(',', '.')) || null,
-                    self_service: price['_3'] === '1',
-                    ultimo_aggiornamento: price['_4']
-                }));
+            // Log per prezzi carburante
+            const stationPrices = cache.pricesData.filter(p => {
+                const matches = p['_0'] === station['_0'] && 
+                              p['_1']?.trim().toUpperCase() === TipoFuel.trim().toUpperCase();
+                
+                if (station['_6'] === 'SCALEA' && matches) {
+                    console.log('Trovato prezzo per Scalea:', {
+                        tipo: p['_1'],
+                        prezzo: p['_2'],
+                        self_service: p['_3']
+                    });
+                }
+                return matches;
+            });
 
             return {
                 id_stazione: station['_0'],
@@ -706,31 +698,30 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
                     lon: parseFloat((station['_9'] || '').toString().replace(',', '.'))
                 },
                 distanza: Number(station._distance.toFixed(2)),
-                prezzi_carburanti: stationPrices
+                prezzi_carburanti: stationPrices.map(price => ({
+                    tipo: price['_1'],
+                    prezzo: parseFloat((price['_2'] || '0').toString().replace(',', '.')) || null,
+                    self_service: price['_3'] === '1',
+                    ultimo_aggiornamento: price['_4']
+                }))
             };
-        });
+        })
+        .filter(station => station.prezzi_carburanti.length > 0);
 
-    console.log('Debug - Stazioni trovate prima del sort:', gasolineStations.length);
+    // Log finale dei risultati
+    console.log(`Trovate ${gasolineStations.length} stazioni nel raggio di ${maxDistance}km`);
 
-    // Ordina per distanza
-    gasolineStations = gasolineStations
+    // Ordina per distanza e limita il numero di risultati
+    const allStations = gasolineStations
         .sort((a, b) => a.distanza - b.distanza)
         .slice(0, parseInt(distance * 4));
-
-    console.log('Debug - Stazioni finali:', gasolineStations.length);
 
     res.json({
         status: 'success',
         timestamp: new Date().toISOString(),
-        debug_info: {
-            requested_fuel: TipoFuel,
-            valid_prices_count: validPrices.length,
-            total_stations: cache.stationsData.length,
-            found_stations: gasolineStations.length
-        },
         totale_stazioni: cache.stationsData.length,
-        stazioni_trovate: gasolineStations.length,
-        stations: gasolineStations
+        stazioni_trovate: allStations.length,
+        stations: allStations
     });
 });
 
