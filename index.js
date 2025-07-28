@@ -72,7 +72,14 @@ async function readLocalCSV(filePath) {
         fs.createReadStream(filePath)
             .pipe(csv({
                 separator: ';',
-                mapHeaders: ({ header, index }) => `_${index}`
+                mapHeaders: ({ header, index }) => `_${index}`,
+                mapValues: ({ header, value }) => {
+                    // Sostituisci le virgole con punti per i numeri decimali
+                    if (value && !isNaN(value.replace(',', '.'))) {
+                        return value.replace(',', '.');
+                    }
+                    return value;
+                }
             }))
             .on('data', (data) => {
                 if (!isFirstRow) {
