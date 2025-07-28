@@ -626,27 +626,37 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
     const userLng = parseFloat(lng);
     const maxDistance = parseFloat(distance);
 
-    // Aggiungi debug dei dati grezzi
-    console.log('[DEBUG] Esempio prezzi:', cache.pricesData.slice(0, 5));
-    
-    // Cerca prezzi specifici per la stazione 45672
-    const prices45672 = cache.pricesData.filter(p => p['_0'] === '45672');
-    console.log('[DEBUG] Prezzi per stazione 45672:', prices45672);
+    // Normalizza tutti gli ID come stringhe e rimuovi spazi
+    const normalizeId = (id) => String(id).trim();
 
-    // Verifica struttura dati prezzi
-    const priceTypes = new Set(cache.pricesData.map(p => typeof p['_0']));
-    console.log('[DEBUG] Tipi di ID nei prezzi:', Array.from(priceTypes));
+    // Mappa degli ID prezzi per lookup veloce
+    const pricesMap = new Map();
+    cache.pricesData.forEach(price => {
+        const id = normalizeId(price['_0']);
+        if (!pricesMap.has(id)) {
+            pricesMap.set(id, []);
+        }
+        pricesMap.get(id).push(price);
+    });
 
-    // Cerca stazioni nel raggio
+    // Debug stazione specifica
+    const targetId = '45672';
+    console.log('[DEBUG] Dati stazione 45672:', {
+        prezziTrovati: pricesMap.has(targetId),
+        numeroPrezziBenzina: pricesMap.get(targetId)?.filter(p => p['_1']?.trim().toUpperCase() === TipoFuel.trim().toUpperCase()).length || 0,
+        tuttiPrezzi: pricesMap.get(targetId) || []
+    });
+
     let gasolineStations = cache.stationsData
         .map(station => {
-            const stationId = String(station['_0']);
-            const stationPrices = cache.pricesData.filter(p => String(p['_0']) === stationId);
+            const stationId = normalizeId(station['_0']);
+            const stationPrices = pricesMap.get(stationId) || [];
             
-            if (stationId === '45672') {
-                console.log('[DEBUG] Dettagli stazione 45672:', {
-                    station,
-                    prices: stationPrices
+            if (stationId === targetId) {
+                console.log('[DEBUG] Elaborazione stazione 45672:', {
+                    stationId,
+                    foundPrices: stationPrices.length,
+                    station
                 });
             }
 
@@ -658,12 +668,13 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
             }
 
             const dist = calculateDistance(userLat, userLng, stationLat, stationLng);
-
             if (dist > maxDistance) {
                 return null;
             }
 
-            const filteredPrices = stationPrices.filter(p => p['_1']?.trim().toUpperCase() === TipoFuel.trim().toUpperCase());
+            const filteredPrices = stationPrices.filter(p => 
+                p['_1']?.trim().toUpperCase() === TipoFuel.trim().toUpperCase()
+            );
 
             if (filteredPrices.length === 0) {
                 return null;
