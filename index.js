@@ -37,14 +37,32 @@ let cache = {
 // Funzione per calcolare la distanza tra due punti usando la formula di Haversine
 function calculateDistance(lat1, lon1, lat2, lon2) {
     const R = 6371; // Raggio della Terra in km
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lon2 - lon1) * Math.PI / 180; // Corretto qui: era (lon1 - lon1)
-    const a =
-        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-        Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c;
+    
+    // Converti le coordinate in radianti
+    const lat1Rad = lat1 * Math.PI / 180;
+    const lat2Rad = lat2 * Math.PI / 180;
+    const deltaLat = (lat2 - lat1) * Math.PI / 180;
+    const deltaLon = (lon2 - lon1) * Math.PI / 180;
+
+    // Formula di Haversine
+    const a = 
+        Math.sin(deltaLat/2) * Math.sin(deltaLat/2) +
+        Math.cos(lat1Rad) * Math.cos(lat2Rad) * 
+        Math.sin(deltaLon/2) * Math.sin(deltaLon/2);
+    
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    const distance = R * c;
+
+    // Log per debug
+    if (distance <= 100) {
+        console.log('Calcolo distanza:', {
+            da: {lat: lat1, lon: lon1},
+            a: {lat: lat2, lon: lon2},
+            distanza: distance
+        });
+    }
+
+    return distance;
 }
 
 // Rilevamento dell'ambiente Vercel
@@ -609,49 +627,75 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
     // 1. Ottieni le stazioni di benzina filtrate per TipoFuel
     let gasolineStations = cache.stationsData
         .filter(station => {
-            const stationLat = parseFloat(station['_8']);
-            const stationLng = parseFloat(station['_9']);
+            // Verifica che i valori esistano prima di usare replace
+            if (!station['_8'] || !station['_9']) {
+                console.log('Stazione senza coordinate:', station['_0']);
+                return false;
+            }
+
+            // Converti le coordinate in modo sicuro
+            const stationLat = parseFloat((station['_8'] + '').replace(',', '.'));
+            const stationLng = parseFloat((station['_9'] + '').replace(',', '.'));
+            
+            // Debug log
+            console.log('Analisi coordinate:', {
+                id: station['_0'],
+                nome: station['_4'],
+                lat_raw: station['_8'],
+                lng_raw: station['_9'],
+                lat_parsed: stationLat,
+                lng_parsed: stationLng
+            });
 
             if (isNaN(stationLat) || isNaN(stationLng)) {
+                console.log('Coordinate non valide per stazione:', station['_0']);
                 return false;
             }
 
             const dist = calculateDistance(userLat, userLng, stationLat, stationLng);
             station._distance = dist;
+
+            // Debug per Scalea
+            if (station['_6'] === 'SCALEA') {
+                console.log('Stazione Scalea trovata:', {
+                    coordinate: { lat: stationLat, lng: stationLng },
+                    distanza: dist,
+                    maxDistance: maxDistance
+                });
+            }
+
             return dist <= maxDistance;
         })
-        .map(station => {
-            const stationId = station['_0'];
-            const stationPrices = cache.pricesData.filter(p => p['_0'] === stationId && p['_1'].trim().toUpperCase() == TipoFuel.trim().toUpperCase());
-
-            return {
-                id_stazione: stationId,
-                tipo_stazione: 'Benzina',
-                bandiera: station['_2'],
-                dettagli_stazione: {
-                    gestore: station['_1'],
-                    tipo: station['_3'],
-                    nome: station['_4']
-                },
-                indirizzo: {
-                    via: station['_5'],
-                    comune: station['_6'],
-                    provincia: station['_7']
-                },
-                maps: {
-                    lat: parseFloat(station['_8']),
-                    lon: parseFloat(station['_9'])
-                },
-                distanza: Number(station._distance.toFixed(2)),
-                prezzi_carburanti: stationPrices.map(price => ({
+        .map(station => ({
+            id_stazione: station['_0'],
+            tipo_stazione: 'Benzina',
+            bandiera: station['_2'],
+            dettagli_stazione: {
+                gestore: station['_1'],
+                tipo: station['_3'],
+                nome: station['_4']
+            },
+            indirizzo: {
+                via: station['_5'],
+                comune: station['_6'],
+                provincia: station['_7']
+            },
+            maps: {
+                lat: parseFloat((station['_8'] + '').replace(',', '.')),
+                lon: parseFloat((station['_9'] + '').replace(',', '.'))
+            },
+            distanza: Number(station._distance.toFixed(2)),
+            prezzi_carburanti: cache.pricesData
+                .filter(p => p['_0'] === station['_0'] && 
+                           p['_1']?.trim().toUpperCase() === TipoFuel.trim().toUpperCase())
+                .map(price => ({
                     tipo: price['_1'],
-                    prezzo: parseFloat(price['_2']?.replace(',', '.')) || null,
+                    prezzo: parseFloat((price['_2'] || '0').replace(',', '.')) || null,
                     self_service: price['_3'] === '1',
                     ultimo_aggiornamento: price['_4']
                 }))
-            };
-        })
-        .filter(station => station.prezzi_carburanti.length > 0); // Solo stazioni con almeno un prezzo per quel TipoFuel
+        }))
+        .filter(station => station.prezzi_carburanti.length > 0);
 
     // Ordina per distanza e limita il numero di risultati
     const allStations = gasolineStations
