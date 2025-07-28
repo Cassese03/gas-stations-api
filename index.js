@@ -63,7 +63,7 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
     const distance = R * c;
 
     // Debug ogni calcolo della distanza
-    if(distance<100)
+    if(distance < 50)
     console.log('[DEBUG] Calcolo distanza:', {
         da: {lat: lat1, lon: lon1},
         a: {lat: lat2, lon: lon2},
@@ -612,15 +612,20 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
     await updateDataIfNeeded();
     console.log('\n[DEBUG] Inizio elaborazione gas-stations-by-fuel');
 
+    // Aggiungi questo debug per vedere tutti gli ID disponibili
+    console.log('[DEBUG] Lista primi 20 ID stazioni disponibili:', 
+        cache.stationsData.slice(0, 20).map(s => ({
+            id: s['_0'],
+            bandiera: s['_2'],
+            coordinate: {
+                lat: s['_8'],
+                lng: s['_9']
+            }
+        }))
+    );
+
     const { lat, lng, distance, TipoFuel } = req.query;
     console.log('[DEBUG] Query params:', { lat, lng, distance, TipoFuel });
-
-    if (!lat || !lng || !distance || !TipoFuel) {
-        return res.status(400).json({
-            status: 'error',
-            message: 'Parametri lat, lng, distance e TipoFuel sono richiesti'
-        });
-    }
 
     // Se il tipo fuel è "Elettrico", inoltra la richiesta all'endpoint /charge-stations
     if (TipoFuel.trim().toUpperCase() === 'ELETTRICA') {
@@ -629,6 +634,21 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
         // Inoltra la richiesta a /charge-stations mantenendo i parametri lat, lng, distance
         req.url = `/charge-stations?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}&distance=${encodeURIComponent(distance)}`;
         return app._router.handle(req, res, () => {});
+    }
+
+    // Modifica la ricerca della stazione target
+    const targetId = '45672'; // Aggiungi le virgolette per confrontare come stringa
+    console.log('[DEBUG] Cercando stazione con ID:', targetId);
+    
+    const targetStation = cache.stationsData.find(s => normalizeId(s['_0']) === targetId);
+    console.log('[DEBUG] Stazione trovata?', targetStation ? 'SI' : 'NO');
+    
+    if (targetStation) {
+        console.log('[DEBUG] Dettagli completi stazione target:', targetStation);
+    } else {
+        console.log('[DEBUG] Stazione non trovata nei dati. Verifica degli ID disponibili...');
+        const allIds = cache.stationsData.map(s => s['_0']).slice(0, 50);
+        console.log('[DEBUG] Primi 50 ID disponibili:', allIds);
     }
 
     if (!cache.stationsData || !cache.pricesData) {
@@ -662,22 +682,20 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
     });
 
     // Debug stazione specifica
-    const targetId = '45672';
-    const targetStation = cache.stationsData.find(s => normalizeId(s['_0']) === targetId);
-    if (targetStation) {
-        const targetLat = parseFloat(targetStation['_8']?.toString().replace(',', '.'));
-        const targetLng = parseFloat(targetStation['_9']?.toString().replace(',', '.'));
+    const targetStationDebug = cache.stationsData.find(s => normalizeId(s['_0']) === targetId);
+    if (targetStationDebug) {
+        const targetLat = parseFloat(targetStationDebug['_8']?.toString().replace(',', '.'));
+        const targetLng = parseFloat(targetStationDebug['_9']?.toString().replace(',', '.'));
         const targetDist = calculateDistance(userLat, userLng, targetLat, targetLng);
         
         console.log('[DEBUG] Dettagli stazione 45672:', {
             coordinate: { lat: targetLat, lng: targetLng },
-            coordinateOriginali: { lat: targetStation['_8'], lng: targetStation['_9'] },
+            coordinateOriginali: { lat: targetStationDebug['_8'], lng: targetStationDebug['_9'] },
             distanza: targetDist,
             entroRaggio: targetDist <= maxDistance,
             prezzi: pricesMap.get(targetId) || []
         });
     }
-
     let gasolineStations = cache.stationsData
         .map(station => {
             const stationId = normalizeId(station['_0']);
@@ -704,6 +722,7 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
                 });
                 return null;
             }
+
 
             const dist = calculateDistance(userLat, userLng, stationLat, stationLng);
             
