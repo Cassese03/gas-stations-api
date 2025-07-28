@@ -624,78 +624,92 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
     const userLng = parseFloat(lng);
     const maxDistance = parseFloat(distance);
 
+    console.log('Ricerca stazioni intorno a:', { userLat, userLng, maxDistance, TipoFuel });
+
     // 1. Ottieni le stazioni di benzina filtrate per TipoFuel
     let gasolineStations = cache.stationsData
         .filter(station => {
-            // Verifica che i valori esistano prima di usare replace
-            if (!station['_8'] || !station['_9']) {
-                console.log('Stazione senza coordinate:', station['_0']);
-                return false;
+            // Conversione sicura delle coordinate
+            const stationLat = parseFloat((station['_8'] || '').toString().replace(',', '.'));
+            const stationLng = parseFloat((station['_9'] || '').toString().replace(',', '.'));
+            
+            // Log per debug
+            if (station['_6'] === 'SCALEA') {
+                console.log('Analisi stazione Scalea:', {
+                    id: station['_0'],
+                    nome: station['_4'],
+                    lat_orig: station['_8'],
+                    lng_orig: station['_9'],
+                    lat_parsed: stationLat,
+                    lng_parsed: stationLng
+                });
             }
 
-            // Converti le coordinate in modo sicuro
-            const stationLat = parseFloat((station['_8'] + '').replace(',', '.'));
-            const stationLng = parseFloat((station['_9'] + '').replace(',', '.'));
-            
-            // Debug log
-            console.log('Analisi coordinate:', {
-                id: station['_0'],
-                nome: station['_4'],
-                lat_raw: station['_8'],
-                lng_raw: station['_9'],
-                lat_parsed: stationLat,
-                lng_parsed: stationLng
-            });
-
             if (isNaN(stationLat) || isNaN(stationLng)) {
-                console.log('Coordinate non valide per stazione:', station['_0']);
                 return false;
             }
 
             const dist = calculateDistance(userLat, userLng, stationLat, stationLng);
-            station._distance = dist;
-
-            // Debug per Scalea
+            
+            // Log distanza per debug
             if (station['_6'] === 'SCALEA') {
-                console.log('Stazione Scalea trovata:', {
-                    coordinate: { lat: stationLat, lng: stationLng },
-                    distanza: dist,
-                    maxDistance: maxDistance
+                console.log('Distanza calcolata per Scalea:', {
+                    dist,
+                    maxDistance,
+                    inRange: dist <= maxDistance
                 });
             }
 
+            station._distance = dist;
             return dist <= maxDistance;
         })
-        .map(station => ({
-            id_stazione: station['_0'],
-            tipo_stazione: 'Benzina',
-            bandiera: station['_2'],
-            dettagli_stazione: {
-                gestore: station['_1'],
-                tipo: station['_3'],
-                nome: station['_4']
-            },
-            indirizzo: {
-                via: station['_5'],
-                comune: station['_6'],
-                provincia: station['_7']
-            },
-            maps: {
-                lat: parseFloat((station['_8'] + '').replace(',', '.')),
-                lon: parseFloat((station['_9'] + '').replace(',', '.'))
-            },
-            distanza: Number(station._distance.toFixed(2)),
-            prezzi_carburanti: cache.pricesData
-                .filter(p => p['_0'] === station['_0'] && 
-                           p['_1']?.trim().toUpperCase() === TipoFuel.trim().toUpperCase())
-                .map(price => ({
+        .map(station => {
+            // Log per prezzi carburante
+            const stationPrices = cache.pricesData.filter(p => {
+                const matches = p['_0'] === station['_0'] && 
+                              p['_1']?.trim().toUpperCase() === TipoFuel.trim().toUpperCase();
+                
+                if (station['_6'] === 'SCALEA' && matches) {
+                    console.log('Trovato prezzo per Scalea:', {
+                        tipo: p['_1'],
+                        prezzo: p['_2'],
+                        self_service: p['_3']
+                    });
+                }
+                return matches;
+            });
+
+            return {
+                id_stazione: station['_0'],
+                tipo_stazione: 'Benzina',
+                bandiera: station['_2'],
+                dettagli_stazione: {
+                    gestore: station['_1'],
+                    tipo: station['_3'],
+                    nome: station['_4']
+                },
+                indirizzo: {
+                    via: station['_5'],
+                    comune: station['_6'],
+                    provincia: station['_7']
+                },
+                maps: {
+                    lat: parseFloat((station['_8'] || '').toString().replace(',', '.')),
+                    lon: parseFloat((station['_9'] || '').toString().replace(',', '.'))
+                },
+                distanza: Number(station._distance.toFixed(2)),
+                prezzi_carburanti: stationPrices.map(price => ({
                     tipo: price['_1'],
-                    prezzo: parseFloat((price['_2'] || '0').replace(',', '.')) || null,
+                    prezzo: parseFloat((price['_2'] || '0').toString().replace(',', '.')) || null,
                     self_service: price['_3'] === '1',
                     ultimo_aggiornamento: price['_4']
                 }))
-        }))
+            };
+        })
         .filter(station => station.prezzi_carburanti.length > 0);
+
+    // Log finale dei risultati
+    console.log(`Trovate ${gasolineStations.length} stazioni nel raggio di ${maxDistance}km`);
 
     // Ordina per distanza e limita il numero di risultati
     const allStations = gasolineStations
