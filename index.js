@@ -652,7 +652,8 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
             if (stationPrices.length === 0) {
                 return null;
             }
-
+            if(station['_0'] == 45672 )
+                console.log(distance, station['_0'], station['_8'], station['_9'], stationPrices);
             return {
                 id_stazione: station['_0'],
                 tipo_stazione: 'Benzina',
