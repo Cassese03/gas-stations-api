@@ -609,18 +609,15 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
     // 1. Ottieni le stazioni di benzina filtrate per TipoFuel
     let gasolineStations = cache.stationsData
         .filter(station => {
-            // Converti esplicitamente le stringhe in numeri, gestendo sia punto che virgola
-            const stationLat = parseFloat(station['_8'].replace(',', '.'));
-            const stationLng = parseFloat(station['_9'].replace(',', '.'));
+            const stationLat = parseFloat(station['_8']);
+            const stationLng = parseFloat(station['_9']);
 
             if (isNaN(stationLat) || isNaN(stationLng)) {
-                console.log(`Coordinate non valide per stazione ${station['_0']}: ${station['_8']}, ${station['_9']}`);
                 return false;
             }
 
             const dist = calculateDistance(userLat, userLng, stationLat, stationLng);
             station._distance = dist;
-            
             return dist <= maxDistance;
         })
         .map(station => {
