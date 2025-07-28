@@ -632,20 +632,32 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
         .map(station => {
             const stationLat = parseFloat(station['_8']?.toString().replace(',', '.'));
             const stationLng = parseFloat(station['_9']?.toString().replace(',', '.'));
-            if(station['_0'] == 45672) {
-            console.log('Stazione trovata:', {
-                id: station['_0'],
-                distanza: 0,
-                coordinate: { lat: station['_8'], lng: station['_9'] },
-            });
-        }
+            
+            // Debug log spostato qui dopo il parsing delle coordinate
+            if(station['_0'] === '45672') {
+                console.log('Analisi stazione 45672:', {
+                    id: station['_0'],
+                    coordinate_raw: { lat: station['_8'], lng: station['_9'] },
+                    coordinate_parsed: { lat: stationLat, lng: stationLng },
+                    is_valid: !isNaN(stationLat) && !isNaN(stationLng)
+                });
+            }
 
             if (isNaN(stationLat) || isNaN(stationLng)) {
                 return null;
             }
 
             const dist = calculateDistance(userLat, userLng, stationLat, stationLng);
-           
+            
+            // Debug log per la distanza
+            if(station['_0'] === '45672') {
+                console.log('Distanza calcolata per 45672:', {
+                    distanza: dist,
+                    max_distance: maxDistance,
+                    in_range: dist <= maxDistance
+                });
+            }
+
             if (dist > maxDistance) {
                 return null;
             }
@@ -656,17 +668,14 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
                 p['_1']?.trim().toUpperCase() === TipoFuel.trim().toUpperCase()
             );
 
-            // Debug log spostato qui dopo la definizione di stationPrices
-            if(station['_0'] == 45672) {
-                console.log('Stazione trovata:', {
-                    id: station['_0'],
-                    distanza: dist,
-                    coordinate: { lat: station['_8'], lng: station['_9'] },
+            // Debug log per i prezzi
+            if(station['_0'] === '45672') {
+                console.log('Prezzi trovati per 45672:', {
+                    n_prezzi: stationPrices.length,
                     prezzi: stationPrices
                 });
             }
 
-            // Se non ci sono prezzi per questo tipo di carburante, salta la stazione
             if (stationPrices.length === 0) {
                 return null;
             }
