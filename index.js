@@ -632,11 +632,12 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
         .map(station => {
             const stationLat = parseFloat(station['_8']?.toString().replace(',', '.'));
             const stationLng = parseFloat(station['_9']?.toString().replace(',', '.'));
+            const stationId = station['_0'];
             
             // Debug log spostato qui dopo il parsing delle coordinate
-            if(station['_0'] === '45672') {
+            if(stationId === '45672' || stationId === 45672) {  // Controlla entrambi i tipi
                 console.log('Analisi stazione 45672:', {
-                    id: station['_0'],
+                    id: stationId,
                     coordinate_raw: { lat: station['_8'], lng: station['_9'] },
                     coordinate_parsed: { lat: stationLat, lng: stationLng },
                     is_valid: !isNaN(stationLat) && !isNaN(stationLng)
@@ -650,7 +651,7 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
             const dist = calculateDistance(userLat, userLng, stationLat, stationLng);
             
             // Debug log per la distanza
-            if(station['_0'] === '45672') {
+            if(stationId === '45672' || stationId === 45672) {
                 console.log('Distanza calcolata per 45672:', {
                     distanza: dist,
                     max_distance: maxDistance,
@@ -664,12 +665,12 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
 
             // 2. Solo per le stazioni vicine, cerca i prezzi del carburante richiesto
             const stationPrices = cache.pricesData.filter(p => 
-                p['_0'] === station['_0'] && 
+                p['_0'] === stationId && 
                 p['_1']?.trim().toUpperCase() === TipoFuel.trim().toUpperCase()
             );
 
             // Debug log per i prezzi
-            if(station['_0'] === '45672') {
+            if(stationId === '45672' || stationId === 45672) {
                 console.log('Prezzi trovati per 45672:', {
                     n_prezzi: stationPrices.length,
                     prezzi: stationPrices
