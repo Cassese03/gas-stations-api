@@ -633,12 +633,12 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
             const stationLat = parseFloat(station['_8']?.toString().replace(',', '.'));
             const stationLng = parseFloat(station['_9']?.toString().replace(',', '.'));
             
-    console.log('Stazione trovata:', {
-        id: station['_0'],
-        distanza: 0,
-        coordinate: { lat: station['_8'], lng: station['_9'] },
-        prezzi: stationPrices
-    });
+            console.log('Stazione trovata:', {
+                id: station['_0'],
+                distanza: 0,
+                coordinate: { lat: station['_8'], lng: station['_9'] },
+                prezzi: stationPrices
+            });
             if (isNaN(stationLat) || isNaN(stationLng)) {
                 return null;
             }
