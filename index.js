@@ -661,14 +661,7 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
             const inRange = dist <= maxDistance;
             
             // Log distanze per debug
-            if (dist <= maxDistance) {
-                console.log('Stazione in range:', {
-                    id: station['_0'],
-                    nome: station['_4'],
-                    distanza: dist,
-                    coordinate: {lat: stationLat, lng: stationLng}
-                });
-            }
+            console.log(`Stazione ${station['_0']}: distanza ${dist.toFixed(2)}km - ${inRange ? 'inclusa' : 'esclusa'}`);
 
             return inRange;
         })
@@ -678,12 +671,8 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
                 const matches = p['_0'] === station['_0'] && 
                               p['_1']?.trim().toUpperCase() === TipoFuel.trim().toUpperCase();
                 
-                if (Math.abs(parseFloat((station['_8'] || '').toString().replace(',', '.')) - 39.77250102515673) < 0.0001 && matches) {
-                    console.log('Trovato prezzo per stazione target:', {
-                        tipo: p['_1'],
-                        prezzo: p['_2'],
-                        self_service: p['_3']
-                    });
+                if (matches) {
+                    console.log(`Stazione ${station['_0']}: trovato prezzo ${TipoFuel}`);
                 }
                 return matches;
             });
@@ -715,15 +704,24 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
                 }))
             };
         })
-        .filter(station => station.prezzi_carburanti.length > 0);
+        .filter(station => {
+            const hasPrices = station.prezzi_carburanti.length > 0;
+            
+            // Log per tracciare il filtro dei prezzi
+            console.log(`Stazione ${station.id_stazione}: ${hasPrices ? 'ha prezzi' : 'no prezzi'}`);
+            
+            return hasPrices;
+        });
 
     // Log finale dei risultati
-    console.log(`Trovate ${gasolineStations.length} stazioni nel raggio di ${maxDistance}km`);
+    console.log(`Totale stazioni trovate prima del limit: ${gasolineStations.length}`);
 
     // Ordina per distanza e limita il numero di risultati
     const allStations = gasolineStations
         .sort((a, b) => a.distanza - b.distanza)
         .slice(0, parseInt(distance * 4));
+
+    console.log(`Stazioni dopo il limit: ${allStations.length}`);
 
     res.json({
         status: 'success',
