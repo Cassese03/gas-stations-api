@@ -627,40 +627,31 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
     console.log('Ricerca stazioni intorno a:', { userLat, userLng, maxDistance, TipoFuel });
     console.log(`Totale stazioni nel database: ${cache.stationsData.length}`);
 
-    // 1. Prima filtra tutte le stazioni per il tipo di carburante richiesto
-    const stationsWithFuel = cache.stationsData.filter(station => {
-        const hasFuel = cache.pricesData.some(price => 
-            price['_0'] === station['_0'] && 
-            price['_1']?.trim().toUpperCase() === TipoFuel.trim().toUpperCase()
-        );
-        
-        if (hasFuel) {
-            console.log(`Stazione ${station['_0']} ha ${TipoFuel}`);
-        }
-        
-        return hasFuel;
-    });
-
-    console.log(`Stazioni trovate con ${TipoFuel}: ${stationsWithFuel.length}`);
-
-    // 2. Poi filtra per distanza tra quelle che hanno il carburante richiesto
-    let gasolineStations = stationsWithFuel
+    // 1. Prima filtra per distanza (più veloce)
+    let gasolineStations = cache.stationsData
         .map(station => {
             const stationLat = parseFloat(station['_8']?.toString().replace(',', '.'));
             const stationLng = parseFloat(station['_9']?.toString().replace(',', '.'));
             
             if (isNaN(stationLat) || isNaN(stationLng)) {
-                console.log(`Stazione ${station['_0']} scartata: coordinate non valide`);
                 return null;
             }
 
             const dist = calculateDistance(userLat, userLng, stationLat, stationLng);
-            station._distance = dist;
+            if (dist > maxDistance) {
+                return null;
+            }
 
+            // 2. Solo per le stazioni vicine, cerca i prezzi del carburante richiesto
             const stationPrices = cache.pricesData.filter(p => 
                 p['_0'] === station['_0'] && 
                 p['_1']?.trim().toUpperCase() === TipoFuel.trim().toUpperCase()
             );
+
+            // Se non ci sono prezzi per questo tipo di carburante, salta la stazione
+            if (stationPrices.length === 0) {
+                return null;
+            }
 
             return {
                 id_stazione: station['_0'],
@@ -689,24 +680,17 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
                 }))
             };
         })
-        .filter(station => station !== null && station.distanza <= maxDistance);
+        .filter(station => station !== null)
+        .sort((a, b) => a.distanza - b.distanza);
 
-    console.log(`Stazioni entro ${maxDistance}km: ${gasolineStations.length}`);
-
-    // 3. Ordina per distanza
-    gasolineStations.sort((a, b) => a.distanza - b.distanza);
-
-    // Rimuovi il limite sul numero di risultati, o aumentalo significativamente
-    const maxResults = Math.max(parseInt(distance * 8), 100); // Minimo 100 risultati
-    const allStations = gasolineStations.slice(0, maxResults);
+    console.log(`Stazioni trovate: ${gasolineStations.length}`);
 
     res.json({
         status: 'success',
         timestamp: new Date().toISOString(),
         totale_stazioni: cache.stationsData.length,
-        stazioni_trovate: allStations.length,
-        stazioni_con_carburante: stationsWithFuel.length,
-        stations: allStations
+        stazioni_trovate: gasolineStations.length,
+        stations: gasolineStations
     });
 });
 
