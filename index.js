@@ -638,7 +638,12 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
             }
 
             const dist = calculateDistance(userLat, userLng, stationLat, stationLng);
-            
+            console.log('Stazione trovata:', {
+                id: station['_0'],
+                distanza: dist,
+                coordinate: { lat: station['_8'], lng: station['_9'] },
+                prezzi: stationPrices
+            });
             if (dist > maxDistance) {
                 return null;
             }
