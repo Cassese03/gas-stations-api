@@ -626,98 +626,46 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
     const userLng = parseFloat(lng);
     const maxDistance = parseFloat(distance);
 
-    // Log dei dati grezzi per la stazione 45672
-    console.log('[DEBUG] ==== DATI GREZZI STAZIONE 45672 ====');
+    // Aggiungi debug dei dati grezzi
+    console.log('[DEBUG] Esempio prezzi:', cache.pricesData.slice(0, 5));
     
-    // Cerca la stazione con diversi metodi
-    const stationExactMatch = cache.stationsData.find(s => s['_0'] === '45672');
-    const stationNumberMatch = cache.stationsData.find(s => s['_0'] === 45672);
-    const stationStringMatch = cache.stationsData.find(s => String(s['_0']) === '45672');
-    
-    console.log('[DEBUG] Ricerca stazione con diversi metodi:', {
-        exactMatch: stationExactMatch ? true : false,
-        numberMatch: stationNumberMatch ? true : false,
-        stringMatch: stationStringMatch ? true : false
-    });
+    // Cerca prezzi specifici per la stazione 45672
+    const prices45672 = cache.pricesData.filter(p => p['_0'] === '45672');
+    console.log('[DEBUG] Prezzi per stazione 45672:', prices45672);
 
-    // Log di tutte le stazioni con ID simile
-    const similarStations = cache.stationsData
-        .filter(s => String(s['_0']).includes('45672'))
-        .map(s => ({id: s['_0'], tipo: typeof s['_0']}));
-    
-    console.log('[DEBUG] Stazioni con ID simile:', similarStations);
+    // Verifica struttura dati prezzi
+    const priceTypes = new Set(cache.pricesData.map(p => typeof p['_0']));
+    console.log('[DEBUG] Tipi di ID nei prezzi:', Array.from(priceTypes));
 
-    // Log dei primi 5 record di stationsData per vedere la struttura
-    console.log('[DEBUG] Primi 5 record di stationsData:', 
-        cache.stationsData.slice(0, 5).map(s => ({id: s['_0'], tipo: typeof s['_0']}))
-    );
-
+    // Cerca stazioni nel raggio
     let gasolineStations = cache.stationsData
         .map(station => {
-            const stationId = String(station['_0']); // Converti sempre in stringa
+            const stationId = String(station['_0']);
+            const stationPrices = cache.pricesData.filter(p => String(p['_0']) === stationId);
             
-            // Verifica se è la stazione che ci interessa
-            const isTargetStation = stationId === '45672';
-            if (isTargetStation) {
-                console.log('[DEBUG] Processing stazione 45672:', station);
+            if (stationId === '45672') {
+                console.log('[DEBUG] Dettagli stazione 45672:', {
+                    station,
+                    prices: stationPrices
+                });
             }
 
             const stationLat = parseFloat(station['_8']?.toString().replace(',', '.'));
             const stationLng = parseFloat(station['_9']?.toString().replace(',', '.'));
 
-            if (isTargetStation) {
-                console.log('[DEBUG] Coordinate parsed:', {
-                    raw: { lat: station['_8'], lng: station['_9'] },
-                    parsed: { lat: stationLat, lng: stationLng }
-                });
-            }
-
             if (isNaN(stationLat) || isNaN(stationLng)) {
-                if (isTargetStation) {
-                    console.log('[DEBUG] Coordinate non valide per 45672');
-                }
                 return null;
             }
 
             const dist = calculateDistance(userLat, userLng, stationLat, stationLng);
-            
-            if (isTargetStation) {
-                console.log('[DEBUG] Distanza calcolata:', {
-                    distanza: dist,
-                    maxDistance: maxDistance,
-                    inRange: dist <= maxDistance
-                });
-            }
 
             if (dist > maxDistance) {
-                if (isTargetStation) {
-                    console.log('[DEBUG] Stazione 45672 fuori range');
-                }
                 return null;
             }
 
-            const stationPrices = cache.pricesData.filter(p => {
-                const matches = p['_0'] === stationId && 
-                              p['_1']?.trim().toUpperCase() === TipoFuel.trim().toUpperCase();
-                
-                if (isTargetStation) {
-                    console.log('[DEBUG] Verifica prezzo:', {
-                        price: p,
-                        matches: matches
-                    });
-                }
-                
-                return matches;
-            });
+            const filteredPrices = stationPrices.filter(p => p['_1']?.trim().toUpperCase() === TipoFuel.trim().toUpperCase());
 
-            if (isTargetStation) {
-                console.log('[DEBUG] Prezzi filtrati per 45672:', stationPrices);
-            }
-
-            if (stationPrices.length === 0) {
-                if (isTargetStation) {
-                    console.log('[DEBUG] Nessun prezzo trovato per 45672');
-                }
+            if (filteredPrices.length === 0) {
                 return null;
             }
 
@@ -740,7 +688,7 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
                     lon: stationLng
                 },
                 distanza: Number(dist.toFixed(2)),
-                prezzi_carburanti: stationPrices.map(price => ({
+                prezzi_carburanti: filteredPrices.map(price => ({
                     tipo: price['_1'],
                     prezzo: parseFloat(price['_2']?.replace(',', '.')) || null,
                     self_service: price['_3'] === '1',
