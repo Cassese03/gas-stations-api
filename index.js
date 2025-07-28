@@ -36,15 +36,24 @@ let cache = {
 
 // Funzione per calcolare la distanza tra due punti usando la formula di Haversine
 function calculateDistance(lat1, lon1, lat2, lon2) {
+    // Converti stringhe in numeri e rimuovi spazi
+    lat1 = parseFloat(String(lat1).trim());
+    lon1 = parseFloat(String(lon1).trim());
+    lat2 = parseFloat(String(lat2).trim());
+    lon2 = parseFloat(String(lon2).trim());
+
+    // Verifica validità coordinate
+    if (isNaN(lat1) || isNaN(lon1) || isNaN(lat2) || isNaN(lon2)) {
+        console.log('[DEBUG] Coordinate non valide:', { lat1, lon1, lat2, lon2 });
+        return Infinity;
+    }
+
     const R = 6371; // Raggio della Terra in km
-    
-    // Converti le coordinate in radianti
     const lat1Rad = lat1 * Math.PI / 180;
     const lat2Rad = lat2 * Math.PI / 180;
     const deltaLat = (lat2 - lat1) * Math.PI / 180;
     const deltaLon = (lon2 - lon1) * Math.PI / 180;
 
-    // Formula di Haversine
     const a = 
         Math.sin(deltaLat/2) * Math.sin(deltaLat/2) +
         Math.cos(lat1Rad) * Math.cos(lat2Rad) * 
@@ -53,14 +62,20 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     const distance = R * c;
 
-    // Log per debug
-    if (distance <= 50) {
-        console.log('Calcolo distanza:', {
-            da: {lat: lat1, lon: lon1},
-            a: {lat: lat2, lon: lon2},
-            distanza: distance
-        });
-    }
+    // Debug ogni calcolo della distanza
+    console.log('[DEBUG] Calcolo distanza:', {
+        da: {lat: lat1, lon: lon1},
+        a: {lat: lat2, lon: lon2},
+        distanza: distance,
+        formule: {
+            lat1Rad,
+            lat2Rad,
+            deltaLat,
+            deltaLon,
+            a,
+            c
+        }
+    });
 
     return distance;
 }
@@ -626,6 +641,12 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
     const userLng = parseFloat(lng);
     const maxDistance = parseFloat(distance);
 
+    console.log('[DEBUG] Coordinate utente normalizzate:', {
+        userLat,
+        userLng,
+        maxDistance
+    });
+
     // Normalizza tutti gli ID come stringhe e rimuovi spazi
     const normalizeId = (id) => String(id).trim();
 
@@ -649,6 +670,7 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
         
         console.log('[DEBUG] Dettagli stazione 45672:', {
             coordinate: { lat: targetLat, lng: targetLng },
+            coordinateOriginali: { lat: targetStation['_8'], lng: targetStation['_9'] },
             distanza: targetDist,
             entroRaggio: targetDist <= maxDistance,
             prezzi: pricesMap.get(targetId) || []
@@ -658,8 +680,18 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
     let gasolineStations = cache.stationsData
         .map(station => {
             const stationId = normalizeId(station['_0']);
-            const stationPrices = pricesMap.get(stationId) || [];
             
+            // Log per la stazione target
+            if (stationId === targetId) {
+                console.log('[DEBUG] Processando stazione 45672:', {
+                    raw: station,
+                    coords: {
+                        lat: station['_8'],
+                        lng: station['_9']
+                    }
+                });
+            }
+
             // Pulisci e valida le coordinate
             const stationLat = parseFloat(station['_8']?.toString().replace(',', '.'));
             const stationLng = parseFloat(station['_9']?.toString().replace(',', '.'));
@@ -687,7 +719,7 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
                 return null;
             }
 
-            const filteredPrices = stationPrices.filter(p => 
+            const filteredPrices = pricesMap.get(stationId).filter(p => 
                 p['_1']?.trim().toUpperCase() === TipoFuel.trim().toUpperCase()
             );
 
