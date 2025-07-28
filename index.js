@@ -80,11 +80,11 @@ async function readLocalCSV(filePath) {
     return new Promise((resolve, reject) => {
         const results = [];
         let isFirstRow = true;
+        let rowCount = 0;
         
         // Verifica se il file esiste
         if (!fs.existsSync(filePath)) {
             console.error(`File non trovato: ${filePath}`);
-            return reject(new Error(`File non trovato: ${filePath}`));
         }
         
         fs.createReadStream(filePath)
@@ -638,9 +638,7 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
             }
 
             const dist = calculateDistance(userLat, userLng, stationLat, stationLng);
-            console.log(distance, station['_0'], station['_8'], station['_9'], stationPrices);
-            if(station['_0'] == 45672 )
-                console.log(distance, station['_0'], station['_8'], station['_9'], stationPrices);
+            
             if (dist > maxDistance) {
                 return null;
             }
@@ -651,10 +649,21 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
                 p['_1']?.trim().toUpperCase() === TipoFuel.trim().toUpperCase()
             );
 
+            // Debug log spostato qui dopo la definizione di stationPrices
+            if(station['_0'] == 45672) {
+                console.log('Stazione trovata:', {
+                    id: station['_0'],
+                    distanza: dist,
+                    coordinate: { lat: station['_8'], lng: station['_9'] },
+                    prezzi: stationPrices
+                });
+            }
+
             // Se non ci sono prezzi per questo tipo di carburante, salta la stazione
             if (stationPrices.length === 0) {
                 return null;
             }
+
             return {
                 id_stazione: station['_0'],
                 tipo_stazione: 'Benzina',
