@@ -637,7 +637,6 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
                 id: station['_0'],
                 distanza: 0,
                 coordinate: { lat: station['_8'], lng: station['_9'] },
-                prezzi: stationPrices
             });
             if (isNaN(stationLat) || isNaN(stationLng)) {
                 return null;
