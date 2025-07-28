@@ -625,57 +625,42 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
     const maxDistance = parseFloat(distance);
 
     console.log('Ricerca stazioni intorno a:', { userLat, userLng, maxDistance, TipoFuel });
+    console.log(`Totale stazioni nel database: ${cache.stationsData.length}`);
 
-    // 1. Ottieni le stazioni di benzina filtrate per TipoFuel
-    let gasolineStations = cache.stationsData
-        .filter(station => {
-            // Conversione sicura delle coordinate con più log
-            const rawLat = station['_8']?.toString().trim();
-            const rawLng = station['_9']?.toString().trim();
-            
-            const stationLat = parseFloat(rawLat?.replace(',', '.'));
-            const stationLng = parseFloat(rawLng?.replace(',', '.'));
-            
-            // Log dettagliato per ogni stazione con coordinate
-            console.log('Analisi stazione:', {
-                id: station['_0'],
-                nome: station['_4'],
-                raw: {
-                    lat: rawLat,
-                    lng: rawLng
-                },
-                parsed: {
-                    lat: stationLat,
-                    lng: stationLng
-                }
-            });
+    // 1. Prima filtra tutte le stazioni per il tipo di carburante richiesto
+    const stationsWithFuel = cache.stationsData.filter(station => {
+        const hasFuel = cache.pricesData.some(price => 
+            price['_0'] === station['_0'] && 
+            price['_1']?.trim().toUpperCase() === TipoFuel.trim().toUpperCase()
+        );
+        
+        if (hasFuel) {
+            console.log(`Stazione ${station['_0']} ha ${TipoFuel}`);
+        }
+        
+        return hasFuel;
+    });
 
+    console.log(`Stazioni trovate con ${TipoFuel}: ${stationsWithFuel.length}`);
+
+    // 2. Poi filtra per distanza tra quelle che hanno il carburante richiesto
+    let gasolineStations = stationsWithFuel
+        .map(station => {
+            const stationLat = parseFloat(station['_8']?.toString().replace(',', '.'));
+            const stationLng = parseFloat(station['_9']?.toString().replace(',', '.'));
+            
             if (isNaN(stationLat) || isNaN(stationLng)) {
-                console.log('Scartata stazione per coordinate non valide:', station['_0']);
-                return false;
+                console.log(`Stazione ${station['_0']} scartata: coordinate non valide`);
+                return null;
             }
 
             const dist = calculateDistance(userLat, userLng, stationLat, stationLng);
             station._distance = dist;
 
-            const inRange = dist <= maxDistance;
-            
-            // Log distanze per debug
-            console.log(`Stazione ${station['_0']}: distanza ${dist.toFixed(2)}km - ${inRange ? 'inclusa' : 'esclusa'}`);
-
-            return inRange;
-        })
-        .map(station => {
-            // Log per prezzi carburante
-            const stationPrices = cache.pricesData.filter(p => {
-                const matches = p['_0'] === station['_0'] && 
-                              p['_1']?.trim().toUpperCase() === TipoFuel.trim().toUpperCase();
-                
-                if (matches) {
-                    console.log(`Stazione ${station['_0']}: trovato prezzo ${TipoFuel}`);
-                }
-                return matches;
-            });
+            const stationPrices = cache.pricesData.filter(p => 
+                p['_0'] === station['_0'] && 
+                p['_1']?.trim().toUpperCase() === TipoFuel.trim().toUpperCase()
+            );
 
             return {
                 id_stazione: station['_0'],
@@ -692,42 +677,35 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
                     provincia: station['_7']
                 },
                 maps: {
-                    lat: parseFloat((station['_8'] || '').toString().replace(',', '.')),
-                    lon: parseFloat((station['_9'] || '').toString().replace(',', '.'))
+                    lat: stationLat,
+                    lon: stationLng
                 },
-                distanza: Number(station._distance.toFixed(2)),
+                distanza: Number(dist.toFixed(2)),
                 prezzi_carburanti: stationPrices.map(price => ({
                     tipo: price['_1'],
-                    prezzo: parseFloat((price['_2'] || '0').toString().replace(',', '.')) || null,
+                    prezzo: parseFloat(price['_2']?.replace(',', '.')) || null,
                     self_service: price['_3'] === '1',
                     ultimo_aggiornamento: price['_4']
                 }))
             };
         })
-        .filter(station => {
-            const hasPrices = station.prezzi_carburanti.length > 0;
-            
-            // Log per tracciare il filtro dei prezzi
-            console.log(`Stazione ${station.id_stazione}: ${hasPrices ? 'ha prezzi' : 'no prezzi'}`);
-            
-            return hasPrices;
-        });
+        .filter(station => station !== null && station.distanza <= maxDistance);
 
-    // Log finale dei risultati
-    console.log(`Totale stazioni trovate prima del limit: ${gasolineStations.length}`);
+    console.log(`Stazioni entro ${maxDistance}km: ${gasolineStations.length}`);
 
-    // Ordina per distanza e limita il numero di risultati
-    const allStations = gasolineStations
-        .sort((a, b) => a.distanza - b.distanza)
-        .slice(0, parseInt(distance * 4));
+    // 3. Ordina per distanza
+    gasolineStations.sort((a, b) => a.distanza - b.distanza);
 
-    console.log(`Stazioni dopo il limit: ${allStations.length}`);
+    // Rimuovi il limite sul numero di risultati, o aumentalo significativamente
+    const maxResults = Math.max(parseInt(distance * 8), 100); // Minimo 100 risultati
+    const allStations = gasolineStations.slice(0, maxResults);
 
     res.json({
         status: 'success',
         timestamp: new Date().toISOString(),
         totale_stazioni: cache.stationsData.length,
         stazioni_trovate: allStations.length,
+        stazioni_con_carburante: stationsWithFuel.length,
         stations: allStations
     });
 });
