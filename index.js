@@ -629,40 +629,29 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
     // 1. Ottieni le stazioni di benzina filtrate per TipoFuel
     let gasolineStations = cache.stationsData
         .filter(station => {
-            // Conversione sicura delle coordinate
-            const stationLat = parseFloat((station['_8'] || '').toString().replace(',', '.'));
-            const stationLng = parseFloat((station['_9'] || '').toString().replace(',', '.'));
+            // Conversione sicura delle coordinate con più log
+            const rawLat = station['_8']?.toString().trim();
+            const rawLng = station['_9']?.toString().trim();
             
-            // Debug: log coordinate e prezzi per la stazione specifica
-            if (Math.abs(stationLat - 39.77250102515673) < 0.0001 && 
-                Math.abs(stationLng - 15.79881727695465) < 0.0001) {
-                console.log('Trovata stazione target:', {
-                    id: station['_0'],
-                    nome: station['_4'],
-                    coordinate: {
-                        orig: {
-                            lat: station['_8'],
-                            lng: station['_9']
-                        },
-                        parsed: {
-                            lat: stationLat,
-                            lng: stationLng
-                        }
-                    },
-                    prezzi: cache.pricesData.filter(p => p['_0'] === station['_0']).map(p => ({
-                        tipo: p['_1'],
-                        prezzo: p['_2'],
-                        self: p['_3']
-                    }))
-                });
-            }
+            const stationLat = parseFloat(rawLat?.replace(',', '.'));
+            const stationLng = parseFloat(rawLng?.replace(',', '.'));
+            
+            // Log dettagliato per ogni stazione con coordinate
+            console.log('Analisi stazione:', {
+                id: station['_0'],
+                nome: station['_4'],
+                raw: {
+                    lat: rawLat,
+                    lng: rawLng
+                },
+                parsed: {
+                    lat: stationLat,
+                    lng: stationLng
+                }
+            });
 
             if (isNaN(stationLat) || isNaN(stationLng)) {
-                console.log('Coordinate non valide per stazione:', {
-                    id: station['_0'],
-                    raw: {lat: station['_8'], lng: station['_9']},
-                    parsed: {lat: stationLat, lng: stationLng}
-                });
+                console.log('Scartata stazione per coordinate non valide:', station['_0']);
                 return false;
             }
 
@@ -671,12 +660,13 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
 
             const inRange = dist <= maxDistance;
             
-            // Debug: log distanza per la stazione target
-            if (Math.abs(stationLat - 39.77250102515673) < 0.0001) {
-                console.log('Distanza calcolata per stazione target:', {
-                    dist,
-                    maxDistance,
-                    inRange
+            // Log distanze per debug
+            if (dist <= maxDistance) {
+                console.log('Stazione in range:', {
+                    id: station['_0'],
+                    nome: station['_4'],
+                    distanza: dist,
+                    coordinate: {lat: stationLat, lng: stationLng}
                 });
             }
 
