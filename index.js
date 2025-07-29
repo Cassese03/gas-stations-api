@@ -34,44 +34,17 @@ let cache = {
     lastUpdate: null
 };
 
-// Funzione per calcolare la distanza tra due punti usando una formula più semplice e robusta
+// Funzione per calcolare la distanza tra due punti usando la formula di Haversine
 function calculateDistance(lat1, lon1, lat2, lon2) {
-    try {
-        // Converti stringhe in numeri e rimuovi spazi
-        lat1 = parseFloat(String(lat1).replace(',', '.').trim());
-        lon1 = parseFloat(String(lon1).replace(',', '.').trim());
-        lat2 = parseFloat(String(lat2).replace(',', '.').trim());
-        lon2 = parseFloat(String(lon2).replace(',', '.').trim());
-
-        // Verifica validità coordinate
-        if (isNaN(lat1) || isNaN(lon1) || isNaN(lat2) || isNaN(lon2)) {
-            console.log('[DEBUG] Coordinate non valide:', { lat1, lon1, lat2, lon2 });
-            return Infinity;
-        }
-
-        // Usa una formula più semplice per il calcolo approssimativo
-        // 1 grado di latitudine = circa 111km
-        // 1 grado di longitudine = circa 111km * cos(latitudine)
-        const latDistance = Math.abs(lat1 - lat2) * 111;
-        const lonDistance = Math.abs(lon1 - lon2) * 111 * Math.cos((lat1 + lat2) / 2 * Math.PI / 180);
-        
-        const distance = Math.sqrt(latDistance * latDistance + lonDistance * lonDistance);
-
-        console.log('[DEBUG] Calcolo distanza:', {
-            da: {lat: lat1, lon: lon1},
-            a: {lat: lat2, lon: lon2},
-            distanza: distance,
-            componenti: {
-                latDistance,
-                lonDistance
-            }
-        });
-
-        return distance;
-    } catch (error) {
-        console.error('[DEBUG] Errore nel calcolo della distanza:', error);
-        return Infinity;
-    }
+    const R = 6371; // Raggio della Terra in km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180; // Corretto qui: era (lon1 - lon1)
+    const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
 }
 
 // Rilevamento dell'ambiente Vercel
@@ -82,87 +55,34 @@ const LOCAL_DATA_DIR = path.join(__dirname, 'public', 'data');
 const STATIONS_CSV_FILE = path.join(LOCAL_DATA_DIR, 'anagrafica_impianti_attivi.csv');
 const PRICES_CSV_FILE = path.join(LOCAL_DATA_DIR, 'prezzo_alle_8.csv');
 
-// Modifica la funzione readLocalCSV per migliorare il debug degli ID
+// Funzione per leggere i file CSV locali - mantiene la stessa logica
 async function readLocalCSV(filePath) {
     console.log(`Lettura file locale: ${filePath}`);
     
     return new Promise((resolve, reject) => {
         const results = [];
         let isFirstRow = true;
-        let rowCount = 0;
-        let headerRow = null;
         
-        // Set per tracciare gli ID univoci e il loro formato originale
-        const uniqueIds = new Map(); // Mappa ID normalizzato -> ID originale
-        
+        // Verifica se il file esiste
         if (!fs.existsSync(filePath)) {
             console.error(`File non trovato: ${filePath}`);
+            return reject(new Error(`File non trovato: ${filePath}`));
         }
         
         fs.createReadStream(filePath)
             .pipe(csv({
                 separator: ';',
-                mapHeaders: ({ header, index }) => {
-                    if (index === 0) return 'idImpianto';
-                    return `_${index}`;
-                },
-                mapValues: ({ header, value }) => {
-                    if (header === 'idImpianto') {
-                        // Non modificare il valore dell'ID in questa fase
-                        return value;
-                    }
-                    // Per altri valori, sostituisci le virgole con punti per i numeri decimali
-                    if (value && !isNaN(value.replace(',', '.'))) {
-                        return value.replace(',', '.');
-                    }
-                    return value;
-                }
+                mapHeaders: ({ header, index }) => `_${index}`
             }))
             .on('data', (data) => {
                 if (!isFirstRow) {
-                    // Salva l'ID originale prima della normalizzazione
-                    const originalId = data.idImpianto;
-                    const normalizedId = String(originalId || '').trim().replace(/^0+/, '');
-                    
-                    uniqueIds.set(normalizedId, originalId);
-                    
-                    // Log dettagliato per ogni ID
-                    if (normalizedId === '45672') {
-                        console.log('[DEBUG] Trovato ID target nel CSV:', {
-                            filePath,
-                            originalId,
-                            normalizedId,
-                            record: data
-                        });
-                    }
-                    
                     results.push(data);
                 } else {
-                    headerRow = data;
                     isFirstRow = false;
                 }
-                rowCount++;
             })
             .on('end', () => {
                 console.log(`Lettura completata: ${results.length} record letti da ${filePath}`);
-                console.log(`Statistiche importazione:`, {
-                    totaleRighe: rowCount,
-                    recordValidi: results.length,
-                    idUnivoci: uniqueIds.size,
-                    headerRow,
-                    esempiIds: Array.from(uniqueIds.entries()).slice(0, 5).map(([norm, orig]) => ({
-                        originale: orig,
-                        normalizzato: norm
-                    })),
-                    targetIdInfo: uniqueIds.has('45672') ? {
-                        presente: true,
-                        originale: uniqueIds.get('45672')
-                    } : {
-                        presente: false,
-                        possibiliMatch: Array.from(uniqueIds.keys())
-                            .filter(id => id.includes('45672'))
-                    }
-                });
                 resolve(results);
             })
             .on('error', (error) => {
@@ -211,8 +131,7 @@ async function downloadChargeStationsData(url) {
 
 async function updateDataIfNeeded() {
     // Aggiorna i dati solo se sono passate più di 23 ore dall'ultimo aggiornamento
-    //const HOURS_23 = 23 * 60 * 60 * 1000;
-    const HOURS_23 = 1;
+    const HOURS_23 = 23 * 60 * 60 * 1000;
 
     if (!cache.lastUpdate || (Date.now() - cache.lastUpdate) > HOURS_23) {
         try {
@@ -650,61 +569,21 @@ app.get('/file-info', (req, res) => {
 // Aggiungi un nuovo endpoint /gas-stations-by-fuel che accetta i parametri lat, lng, distance e TipoFuel, e restituisce solo le stazioni di benzina che hanno almeno un prezzo per quel tipo di carburante (TipoFuel). Il filtro viene applicato sui prezzi_carburanti.
 app.get('/gas-stations-by-fuel', async (req, res) => {
     await updateDataIfNeeded();
-    console.log('\n[DEBUG] Inizio elaborazione gas-stations-by-fuel');
-
-    // Funzione migliorata per la normalizzazione degli ID
-    const normalizeId = (id) => {
-        if (id === null || id === undefined) return '';
-        // Mantieni gli zeri iniziali ma rimuovi spazi e caratteri non numerici
-        return String(id).trim().replace(/[^\d]/g, '');
-    };
-
-    const targetId = '45672';
-
-    // Debug dettagliato dei dati in cache
-    const debugStations = cache.stationsData
-        ?.filter(s => normalizeId(s['_0']) === targetId)
-        .map(s => ({
-            rawId: s['_0'],
-            normalizedId: normalizeId(s['_0']),
-            matches: normalizeId(s['_0']) === targetId,
-            fullRecord: s
-        }));
-
-    console.log('[DEBUG] Ricerca ID target:', {
-        targetId,
-        normalizedTargetId: normalizeId(targetId),
-        trovatiRecord: debugStations?.length || 0,
-        dettagliRecord: debugStations,
-        primiDieciId: cache.stationsData?.slice(0, 10).map(s => ({
-            raw: s['_0'],
-            normalized: normalizeId(s['_0'])
-        }))
-    });
-
-    const tracking = {
-        allIds: [], // tutti gli ID iniziali
-        withValidCoords: [], // ID con coordinate valide
-        inRange: [], // ID nel raggio richiesto
-        withMatchingFuel: [], // ID con il tipo carburante richiesto
-        finalIds: [], // ID nelle stazioni finali
-    };
-
-    const targetTracking = {
-        initialCheck: false,
-        validCoords: false,
-        inRange: false,
-        hasFuel: false,
-        inFinal: false,
-        failureReason: null,
-        lastFoundPhase: null
-    };
 
     const { lat, lng, distance, TipoFuel } = req.query;
 
+    if (!lat || !lng || !distance || !TipoFuel) {
+        return res.status(400).json({
+            status: 'error',
+            message: 'Parametri lat, lng, distance e TipoFuel sono richiesti'
+        });
+    }
+
     // Se il tipo fuel è "Elettrico", inoltra la richiesta all'endpoint /charge-stations
     if (TipoFuel.trim().toUpperCase() === 'ELETTRICA') {
-        req.query.TipoFuel = undefined;
+        // Simula una chiamata interna all'handler /charge-stations
+        req.query.TipoFuel = undefined; // Rimuovi TipoFuel per evitare conflitti
+        // Inoltra la richiesta a /charge-stations mantenendo i parametri lat, lng, distance
         req.url = `/charge-stations?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}&distance=${encodeURIComponent(distance)}`;
         return app._router.handle(req, res, () => {});
     }
@@ -720,135 +599,64 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
     const userLng = parseFloat(lng);
     const maxDistance = parseFloat(distance);
 
-    tracking.allIds = cache.stationsData.map(s => normalizeId(s['_0']));
-    targetTracking.initialCheck = tracking.allIds.includes(targetId);
-    if (targetTracking.initialCheck) {
-        targetTracking.lastFoundPhase = 'initialCheck';
-    } else {
-        targetTracking.failureReason = 'ID non presente nel dataset iniziale';
-    }
-
-    const pricesMap = new Map();
-    let targetPrices = [];
-    cache.pricesData.forEach(price => {
-        const id = normalizeId(price['_0']);
-        if (id === targetId) {
-            targetPrices.push(price);
-        }
-        if (!pricesMap.has(id)) {
-            pricesMap.set(id, []);
-        }
-        pricesMap.get(id).push(price);
-    });
-
+    // 1. Ottieni le stazioni di benzina filtrate per TipoFuel
     let gasolineStations = cache.stationsData
-        .map(station => {
-            const stationId = normalizeId(station['_0']);
-            const isTarget = stationId === targetId;
-            
-            const stationLat = parseFloat(String(station['_8']).replace(',', '.'));
-            const stationLng = parseFloat(String(station['_9']).replace(',', '.'));
-            
-            if (!isNaN(stationLat) && !isNaN(stationLng)) {
-                tracking.withValidCoords.push(stationId);
-                if (isTarget) {
-                    targetTracking.validCoords = true;
-                    targetTracking.lastFoundPhase = 'validCoords';
-                }
-                
-                const dist = calculateDistance(userLat, userLng, stationLat, stationLng);
-                
-                if (dist <= maxDistance) {
-                    tracking.inRange.push(stationId);
-                    if (isTarget) {
-                        targetTracking.inRange = true;
-                        targetTracking.lastFoundPhase = 'inRange';
-                    }
+        .filter(station => {
+            const stationLat = parseFloat(station['_8']);
+            const stationLng = parseFloat(station['_9']);
 
-                    const stationPrices = pricesMap.get(stationId) || [];
-                    const filteredPrices = stationPrices.filter(p => 
-                        p['_1']?.trim().toUpperCase() === TipoFuel.trim().toUpperCase()
-                    );
-
-                    if (filteredPrices.length > 0) {
-                        tracking.withMatchingFuel.push(stationId);
-                        tracking.finalIds.push(stationId);
-                        
-                        if (isTarget) {
-                            targetTracking.hasFuel = true;
-                            targetTracking.inFinal = true;
-                            targetTracking.lastFoundPhase = 'final';
-                        }
-
-                        return {
-                            id_stazione: stationId,
-                            tipo_stazione: 'Benzina',
-                            bandiera: station['_2'],
-                            dettagli_stazione: {
-                                gestore: station['_1'],
-                                tipo: station['_3'],
-                                nome: station['_4']
-                            },
-                            indirizzo: {
-                                via: station['_5'],
-                                comune: station['_6'],
-                                provincia: station['_7']
-                            },
-                            maps: {
-                                lat: stationLat,
-                                lon: stationLng
-                            },
-                            distanza: Number(dist.toFixed(2)),
-                            prezzi_carburanti: filteredPrices.map(price => ({
-                                tipo: price['_1'],
-                                prezzo: parseFloat(price['_2']?.replace(',', '.')) || null,
-                                self_service: price['_3'] === '1',
-                                ultimo_aggiornamento: price['_4']
-                            }))
-                        };
-                    } else if (isTarget) {
-                        targetTracking.failureReason = `Non ha prezzi per il tipo carburante ${TipoFuel}`;
-                    }
-                } else if (isTarget) {
-                    targetTracking.failureReason = `Fuori dal raggio di ${maxDistance}km (distanza: ${dist.toFixed(2)}km)`;
-                }
-            } else if (isTarget) {
-                targetTracking.failureReason = 'Coordinate non valide';
+            if (isNaN(stationLat) || isNaN(stationLng)) {
+                return false;
             }
-            
-            return null;
-        })
-        .filter(station => station !== null)
-        .sort((a, b) => a.distanza - b.distanza);
 
-    console.log('[DEBUG] Tracciamento target ID:', {
-        targetId,
-        tracking: {
-            trovatoInDatasetIniziale: targetTracking.initialCheck,
-            haCoordinateValide: targetTracking.validCoords,
-            nelRaggio: targetTracking.inRange,
-            haCarburanteRichiesto: targetTracking.hasFuel,
-            nelRisultatoFinale: targetTracking.inFinal,
-            ultimaFaseDoveTrovato: targetTracking.lastFoundPhase,
-            motivoEsclusione: targetTracking.failureReason
-        },
-        dettagliPrezzi: targetPrices.length > 0 ? {
-            numeroPrezzi: targetPrices.length,
-            tipiCarburante: [...new Set(targetPrices.map(p => p['_1']))]
-        } : 'Nessun prezzo trovato'
-    });
+            const dist = calculateDistance(userLat, userLng, stationLat, stationLng);
+            station._distance = dist;
+            return dist <= maxDistance;
+        })
+        .map(station => {
+            const stationId = station['_0'];
+            const stationPrices = cache.pricesData.filter(p => p['_0'] === stationId && p['_1'].trim().toUpperCase() == TipoFuel.trim().toUpperCase());
+
+            return {
+                id_stazione: stationId,
+                tipo_stazione: 'Benzina',
+                bandiera: station['_2'],
+                dettagli_stazione: {
+                    gestore: station['_1'],
+                    tipo: station['_3'],
+                    nome: station['_4']
+                },
+                indirizzo: {
+                    via: station['_5'],
+                    comune: station['_6'],
+                    provincia: station['_7']
+                },
+                maps: {
+                    lat: parseFloat(station['_8']),
+                    lon: parseFloat(station['_9'])
+                },
+                distanza: Number(station._distance.toFixed(2)),
+                prezzi_carburanti: stationPrices.map(price => ({
+                    tipo: price['_1'],
+                    prezzo: parseFloat(price['_2']?.replace(',', '.')) || null,
+                    self_service: price['_3'] === '1',
+                    ultimo_aggiornamento: price['_4']
+                }))
+            };
+        })
+        .filter(station => station.prezzi_carburanti.length > 0); // Solo stazioni con almeno un prezzo per quel TipoFuel
+
+    // Ordina per distanza e limita il numero di risultati
+    const allStations = gasolineStations
+        .sort((a, b) => a.distanza - b.distanza)
+        .slice(0, parseInt(distance * 4));
 
     res.json({
         status: 'success',
         timestamp: new Date().toISOString(),
-        debug: {
-            tracking,
-            targetTracking,
-            searchParams: { lat, lng, distance, TipoFuel }
-        },
         totale_stazioni: cache.stationsData.length,
-        stazioni_trovate: gasolineStations.length,
-        stations: gasolineStations
+        stazioni_trovate: allStations.length,
+        stations: allStations
     });
 });
 
