@@ -18,6 +18,11 @@ jobs:
         mkdir -p ./public/data
         curl -L --retry 5 --retry-delay 10 https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv -o ./public/data/anagrafica_impianti_attivi.csv
 
+    - name: Rimuovi caratteri 
+      run: |
+        sed -i 's/"//g' ./public/data/anagrafica_impianti_attivi.csv
+        sed -i 's/://g' ./public/data/anagrafica_impianti_attivi.csv
+
     - name: Commit e push se cambiato
       run: |
         git config user.name "github-actions[bot]"
