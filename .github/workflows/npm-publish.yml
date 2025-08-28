@@ -1,0 +1,65 @@
+# This workflow will run tests using node and then publish a package to GitHub Packages when a release is created
+# For more information see: https://docs.github.com/en/actions/publishing-packages/publishing-nodejs-packages
+name: Node.js Package
+on:
+  release:
+    types: [created]
+  schedule:
+    - cron: '0 7 * * *'  # Ogni giorno alle 9:00 UTC
+  workflow_dispatch:  # Permette di eseguire manualmente
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'  # Esegue solo per release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npm test
+
+  publish-npm:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'  # Esegue solo per release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org/
+      - run: npm ci
+      - run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{secrets.npm_token}}
+
+  daily-api-call:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Call Gas Stations API
+        run: |
+          echo "Calling Gas Stations API at $(date)"
+          response=$(curl -s -w "HTTPSTATUS:%{http_code}" \
+            "https://gas-stations-api.vercel.app/gas-stations-by-fuel?lat=40.932295994917325&lng=14.528311220334043&distance=50&TipoFuel=Benzina")
+          
+          http_code=$(echo $response | tr -d '\n' | sed -e 's/.*HTTPSTATUS://')
+          body=$(echo $response | sed -e 's/HTTPSTATUS\:.*//g')
+          
+          if [ "$http_code" -eq 200 ]; then
+            echo "✅ API call successful!"
+            echo "Response preview:"
+            echo "$body" | head -c 500
+            echo "..."
+          else
+            echo "❌ API call failed with status: $http_code"
+            echo "Response: $body"
+            exit 1
+          fi
+
+      - name: Log completion
+        run: |
+          echo "Daily API call completed at $(date)"
+          echo "Next scheduled run: tomorrow at 9:00 AM UTC"
