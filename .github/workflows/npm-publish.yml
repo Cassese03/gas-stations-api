@@ -4,8 +4,8 @@ name: Node.js Package
 on:
   release:
     types: [created]
-schedule:
-  - cron: '*/10 * * * *'
+  schedule:
+   - cron: '*/10 * * * *'
   workflow_dispatch:  # Permette di eseguire manualmente
 
 jobs:
