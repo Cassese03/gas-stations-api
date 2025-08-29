@@ -343,7 +343,7 @@ app.get('/gas-stations', async (req, res) => {
     // Unisci le stazioni di Google con le altre
     const allStations = [...gasolineStations, ...googleStations]
         .sort((a, b) => a.distanza - b.distanza)
-        .slice(0, parseInt(distance * 4));
+        .slice(0, parseInt(distance * 2));
 
     res.json({
         status: 'success',
@@ -506,7 +506,7 @@ app.get('/charge-stations', async (req, res) => {
     }
     googleStations = await Promise.all(googleStations
         .sort((a, b) => a.distanza - b.distanza)
-        .slice(0, parseInt(distance * 4)));
+        .slice(0, parseInt(distance * 2)));
 
     res.json({
         status: 'success',
@@ -649,7 +649,7 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
     // Ordina per distanza e limita il numero di risultati
     const allStations = gasolineStations
         .sort((a, b) => a.distanza - b.distanza)
-        .slice(0, parseInt(distance * 4));
+        .slice(0, parseInt(distance * 2));
 
     res.json({
         status: 'success',
