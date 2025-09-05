@@ -31,7 +31,9 @@ let cache = {
     stationsData: null,
     pricesData: null,
     chargeStationsData: null,
-    lastUpdate: null
+    lastUpdate: null,
+    // Indici calcolati per prestazioni
+    pricesByStationAndFuel: null
 };
 
 // Funzione per calcolare la distanza tra due punti usando la formula di Haversine
@@ -152,6 +154,23 @@ async function updateDataIfNeeded() {
             if (stations?.length && prices?.length) {
                 cache.stationsData = stations;
                 cache.pricesData = prices;
+                // Costruisci indice: stationId -> fuelTypeUpper -> array di prezzi normalizzati
+                const pricesByStationAndFuel = Object.create(null);
+                for (const price of prices) {
+                    const stationId = price['_0'];
+                    const fuelType = (price['_1'] || '').trim().toUpperCase();
+                    if (!stationId || !fuelType) continue;
+                    const normalized = {
+                        tipo: price['_1'],
+                        prezzo: parseFloat((price['_2'] || '').replace(',', '.')) || null,
+                        self_service: price['_3'] === '1',
+                        ultimo_aggiornamento: price['_4']
+                    };
+                    if (!pricesByStationAndFuel[stationId]) pricesByStationAndFuel[stationId] = Object.create(null);
+                    if (!pricesByStationAndFuel[stationId][fuelType]) pricesByStationAndFuel[stationId][fuelType] = [];
+                    pricesByStationAndFuel[stationId][fuelType].push(normalized);
+                }
+                cache.pricesByStationAndFuel = pricesByStationAndFuel;
 
                 // Trasforma i dati delle stazioni di ricarica con ID prefissati
                 if (chargeStations?.length) {
@@ -172,12 +191,14 @@ async function updateDataIfNeeded() {
                 if (!cache.stationsData) cache.stationsData = [];
                 if (!cache.pricesData) cache.pricesData = [];
                 if (!cache.chargeStationsData) cache.chargeStationsData = [];
+                cache.pricesByStationAndFuel = Object.create(null);
             }
         } catch (error) {
             console.error('Errore aggiornamento:', error.message);
             if (!cache.stationsData) cache.stationsData = [];
             if (!cache.pricesData) cache.pricesData = [];
             if (!cache.chargeStationsData) cache.chargeStationsData = [];
+            cache.pricesByStationAndFuel = Object.create(null);
         }
     }
 }
@@ -599,52 +620,41 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
     const userLng = parseFloat(lng);
     const maxDistance = parseFloat(distance);
 
-    // 1. Ottieni le stazioni di benzina filtrate per TipoFuel
-    let gasolineStations = cache.stationsData
-        .filter(station => {
-            const stationLat = parseFloat(station['_8']);
-            const stationLng = parseFloat(station['_9']);
-
-            if (isNaN(stationLat) || isNaN(stationLng)) {
-                return false;
-            }
-
-            const dist = calculateDistance(userLat, userLng, stationLat, stationLng);
-            station._distance = dist;
-            return dist <= maxDistance;
-        })
-        .map(station => {
-            const stationId = station['_0'];
-            const stationPrices = cache.pricesData.filter(p => p['_0'] === stationId && p['_1'].trim().toUpperCase() == TipoFuel.trim().toUpperCase());
-
-            return {
-                id_stazione: stationId,
-                tipo_stazione: 'Benzina',
-                bandiera: station['_2'],
-                dettagli_stazione: {
-                    gestore: station['_1'],
-                    tipo: station['_3'],
-                    nome: station['_4']
-                },
-                indirizzo: {
-                    via: station['_5'],
-                    comune: station['_6'],
-                    provincia: station['_7']
-                },
-                maps: {
-                    lat: parseFloat(station['_8']),
-                    lon: parseFloat(station['_9'])
-                },
-                distanza: Number(station._distance.toFixed(2)),
-                prezzi_carburanti: stationPrices.map(price => ({
-                    tipo: price['_1'],
-                    prezzo: parseFloat(price['_2']?.replace(',', '.')) || null,
-                    self_service: price['_3'] === '1',
-                    ultimo_aggiornamento: price['_4']
-                }))
-            };
-        })
-        .filter(station => station.prezzi_carburanti.length > 0); // Solo stazioni con almeno un prezzo per quel TipoFuel
+    // 1. Ottieni le stazioni di benzina filtrate per TipoFuel usando l'indice
+    const wantedFuel = TipoFuel.trim().toUpperCase();
+    const gasolineStations = [];
+    for (const station of cache.stationsData) {
+        const stationLat = parseFloat(station['_8']);
+        const stationLng = parseFloat(station['_9']);
+        if (isNaN(stationLat) || isNaN(stationLng)) continue;
+        const dist = calculateDistance(userLat, userLng, stationLat, stationLng);
+        if (dist > maxDistance) continue;
+        const stationId = station['_0'];
+        const stationPricesIdx = cache.pricesByStationAndFuel && cache.pricesByStationAndFuel[stationId];
+        const pricesForFuel = stationPricesIdx ? (stationPricesIdx[wantedFuel] || []) : [];
+        if (!pricesForFuel.length) continue;
+        gasolineStations.push({
+            id_stazione: stationId,
+            tipo_stazione: 'Benzina',
+            bandiera: station['_2'],
+            dettagli_stazione: {
+                gestore: station['_1'],
+                tipo: station['_3'],
+                nome: station['_4']
+            },
+            indirizzo: {
+                via: station['_5'],
+                comune: station['_6'],
+                provincia: station['_7']
+            },
+            maps: {
+                lat: stationLat,
+                lon: stationLng
+            },
+            distanza: Number(dist.toFixed(2)),
+            prezzi_carburanti: pricesForFuel
+        });
+    }
 
     // Ordina per distanza e limita il numero di risultati
     const allStations = gasolineStations
