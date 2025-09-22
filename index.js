@@ -5,6 +5,7 @@ const { Readable } = require('stream');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
+const { log } = require('console');
 
 const app = express();
 
@@ -205,6 +206,10 @@ async function updateDataIfNeeded() {
 
 // Modifica i route handler per usare la cache
 app.get('/gas-stations', async (req, res) => {
+    
+    if(req.get('host').includes("localhost")){
+        return res.redirect('https://app-3000-fazepoppa.eur6.ugdocker.link'+req.originalUrl);
+    } 
     await updateDataIfNeeded();
 
     const { lat, lng, distance } = req.query;
@@ -376,6 +381,9 @@ app.get('/gas-stations', async (req, res) => {
 });
 
 app.get('/api/cron', async (req, res) => {
+    if(req.get('host').includes("localhost")){
+        return res.redirect('https://app-3000-fazepoppa.eur6.ugdocker.link'+req.originalUrl);
+    } 
     try {
         await updateDataIfNeeded();
     } catch (error) {
@@ -389,6 +397,10 @@ app.get('/api/cron', async (req, res) => {
 
 // Endpoint di health check con aggiornamento dati
 app.get('/health', async (req, res) => {
+    
+    if(req.get('host').includes("localhost")){
+        return res.redirect('https://app-3000-fazepoppa.eur6.ugdocker.link'+req.originalUrl);
+    } 
     console.log('Health check iniziato:', new Date().toISOString());
 
     try {
@@ -429,6 +441,10 @@ app.get('/health', async (req, res) => {
 
 // Endpoint per le stazioni di ricarica elettrica
 app.get('/charge-stations', async (req, res) => {
+    
+    if(req.get('host').includes("localhost")){
+        return res.redirect('https://app-3000-fazepoppa.eur6.ugdocker.link'+req.originalUrl);
+    } 
     const { lat, lng, distance } = req.query;
 
     if (!lat || !lng || !distance) {
@@ -540,6 +556,10 @@ app.get('/charge-stations', async (req, res) => {
 
 // Aggiungi un endpoint per visualizzare informazioni sui file locali
 app.get('/file-info', (req, res) => {
+    
+    if(req.get('host').includes("localhost")){
+        return res.redirect('https://app-3000-fazepoppa.eur6.ugdocker.link'+req.originalUrl);
+    } 
     try {
         const stationsExists = fs.existsSync(STATIONS_CSV_FILE);
         const pricesExists = fs.existsSync(PRICES_CSV_FILE);
@@ -589,6 +609,10 @@ app.get('/file-info', (req, res) => {
 
 // Aggiungi un nuovo endpoint /gas-stations-by-fuel che accetta i parametri lat, lng, distance e TipoFuel, e restituisce solo le stazioni di benzina che hanno almeno un prezzo per quel tipo di carburante (TipoFuel). Il filtro viene applicato sui prezzi_carburanti.
 app.get('/gas-stations-by-fuel', async (req, res) => {
+    
+    if(req.get('host').includes("localhost")){
+        return res.redirect('https://app-3000-fazepoppa.eur6.ugdocker.link'+req.originalUrl);
+    } 
     await updateDataIfNeeded();
 
     const { lat, lng, distance, TipoFuel } = req.query;
