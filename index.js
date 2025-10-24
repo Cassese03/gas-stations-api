@@ -320,8 +320,13 @@ app.get('/gas-stations', async (req, res) => {
                         else if (avgPower < 100) stimaPrezzo = 0.60; // DC veloce
                         else stimaPrezzo = 0.70; // DC ultra veloce
                     }
-                    const locality = station.addressComponents.find(component => component.types[0] === "administrative_area_level_3")?.shortText || "N/D";
-                    const provincia = station.addressComponents.find(component => component.types[0] === "administrative_area_level_2")?.shortText || "N/D";
+                    const locality = station.addressComponents?.find(component => 
+                        component?.types && Array.isArray(component.types) && 
+                        component.types.includes("administrative_area_level_3"))?.shortText || "N/D";
+
+                    const provincia = station.addressComponents?.find(component => 
+                        component?.types && Array.isArray(component.types) && 
+                        component.types.includes("administrative_area_level_2"))?.shortText || "N/D";
 
                     return {
                         id_stazione: station.id,
@@ -486,8 +491,13 @@ app.get('/charge-stations', async (req, res) => {
                         else if (avgPower < 100) stimaPrezzo = 0.60; // DC veloce
                         else stimaPrezzo = 0.70; // DC ultra veloce
                     }
-                    const locality = station.addressComponents.find(component => component.types[0] === "administrative_area_level_3")?.shortText || "N/D";
-                    const provincia = station.addressComponents.find(component => component.types[0] === "administrative_area_level_2")?.shortText || "N/D";
+                    const locality = station.addressComponents?.find(component => 
+                        component?.types && Array.isArray(component.types) && 
+                        component.types.includes("administrative_area_level_3"))?.shortText || "N/D";
+
+                    const provincia = station.addressComponents?.find(component => 
+                        component?.types && Array.isArray(component.types) && 
+                        component.types.includes("administrative_area_level_2"))?.shortText || "N/D";
 
                     return {
                         id_stazione: station.id,
