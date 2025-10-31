@@ -206,7 +206,7 @@ async function updateDataIfNeeded() {
 // Modifica i route handler per usare la cache
 app.get('/gas-stations', async (req, res) => {
     if(req.get('host').includes("gas-stations-api.vercel.app")){
-        return res.redirect('https://nas-lorenzo.tailc6d193.ts.net/'+req.originalUrl);
+        return res.redirect('https://nas-lorenzo.tailc6d193.ts.net'+req.originalUrl);
     } 
 
     await updateDataIfNeeded();
@@ -386,7 +386,7 @@ app.get('/gas-stations', async (req, res) => {
 
 app.get('/api/cron', async (req, res) => {
     if(req.get('host').includes("gas-stations-api.vercel.app")){
-        return res.redirect('https://nas-lorenzo.tailc6d193.ts.net/'+req.originalUrl);
+        return res.redirect('https://nas-lorenzo.tailc6d193.ts.net'+req.originalUrl);
     } 
     try {
         await updateDataIfNeeded();
@@ -402,7 +402,7 @@ app.get('/api/cron', async (req, res) => {
 // Endpoint di health check con aggiornamento dati
 app.get('/health', async (req, res) => {
     if(req.get('host').includes("gas-stations-api.vercel.app")){
-        return res.redirect('https://nas-lorenzo.tailc6d193.ts.net/'+req.originalUrl);
+        return res.redirect('https://nas-lorenzo.tailc6d193.ts.net'+req.originalUrl);
     } 
     console.log('Health check iniziato:', new Date().toISOString());
 
@@ -445,7 +445,7 @@ app.get('/health', async (req, res) => {
 // Endpoint per le stazioni di ricarica elettrica
 app.get('/charge-stations', async (req, res) => {
     if(req.get('host').includes("gas-stations-api.vercel.app")){
-        return res.redirect('https://nas-lorenzo.tailc6d193.ts.net/'+req.originalUrl);
+        return res.redirect('https://nas-lorenzo.tailc6d193.ts.net'+req.originalUrl);
     } 
     const { lat, lng, distance } = req.query;
 
@@ -564,7 +564,7 @@ app.get('/charge-stations', async (req, res) => {
 // Aggiungi un endpoint per visualizzare informazioni sui file locali
 app.get('/file-info', (req, res) => {
     if(req.get('host').includes("gas-stations-api.vercel.app")){
-        return res.redirect('https://nas-lorenzo.tailc6d193.ts.net/'+req.originalUrl);
+        return res.redirect('https://nas-lorenzo.tailc6d193.ts.net'+req.originalUrl);
     } 
     try {
         const stationsExists = fs.existsSync(STATIONS_CSV_FILE);
@@ -617,7 +617,7 @@ app.get('/file-info', (req, res) => {
 app.get('/gas-stations-by-fuel', async (req, res) => {
 
     if(req.get('host').includes("gas-stations-api.vercel.app")){
-        return res.redirect('https://nas-lorenzo.tailc6d193.ts.net/'+req.originalUrl);
+        return res.redirect('https://nas-lorenzo.tailc6d193.ts.net'+req.originalUrl);
     } 
     await updateDataIfNeeded();
 
