@@ -145,11 +145,11 @@ async function updateDataIfNeeded() {
             
             // Prova a scaricare le stazioni di ricarica da API esterna
             let chargeStations = [];
-            try {
-                chargeStations = await downloadChargeStationsData('https://api.openchargemap.io/v3/poi/?output=json&countrycode=IT&key=65923063-f5a4-43cd-8ef9-3c1d64195d93&maxresults=1000');
-            } catch (chargeError) {
-                console.error('Errore nel download delle stazioni di ricarica:', chargeError);
-            }
+            // try {
+            //     chargeStations = await downloadChargeStationsData('https://api.openchargemap.io/v3/poi/?output=json&countrycode=IT&key=65923063-f5a4-43cd-8ef9-3c1d64195d93&maxresults=1000');
+            // } catch (chargeError) {
+            //     console.error('Errore nel download delle stazioni di ricarica:', chargeError);
+            // }
 
             if (stations?.length && prices?.length) {
                 cache.stationsData = stations;
