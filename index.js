@@ -73,7 +73,7 @@ async function readLocalCSV(filePath) {
         
         fs.createReadStream(filePath)
             .pipe(csv({
-                separator: ';',
+                separator: '|',  // <-- CAMBIA QUI DA ';' A '|'
                 mapHeaders: ({ header, index }) => `_${index}`
             }))
             .on('data', (data) => {
@@ -280,95 +280,95 @@ app.get('/gas-stations', async (req, res) => {
     // 2. Ottieni le stazioni elettriche
     let electricStations = [];
     let googleStations = [];
-    try {
-        const googleApiKey = 'AIzaSyCoiskCn8rH89TSLvX9rB6yTQO9c0dCcvM'; // Sostituisci con la tua chiave API
-        const googleApiUrl = 'https://places.googleapis.com/v1/places:searchText?languageCode=it';
-        response = await fetch(googleApiUrl, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Goog-Api-Key': googleApiKey,
-                'X-Goog-FieldMask': 'places.id,places.name,places.displayName,places.evChargeOptions,places.location,places.formattedAddress,places.addressComponents',
-            },
-            body: JSON.stringify({
+    // try {
+    //     const googleApiKey = 'AIzaSyCoiskCn8rH89TSLvX9rB6yTQO9c0dCcvM'; // Sostituisci con la tua chiave API
+    //     const googleApiUrl = 'https://places.googleapis.com/v1/places:searchText?languageCode=it';
+    //     response = await fetch(googleApiUrl, {
+    //         method: 'POST',
+    //         headers: {
+    //             'Content-Type': 'application/json',
+    //             'X-Goog-Api-Key': googleApiKey,
+    //             'X-Goog-FieldMask': 'places.id,places.name,places.displayName,places.evChargeOptions,places.location,places.formattedAddress,places.addressComponents',
+    //         },
+    //         body: JSON.stringify({
 
-                textQuery: "Stazioni di ricarica",
-                pageSize: distance*2 || 10,
-                evOptions: {
-                    minimumChargingRateKw: 1
-                },
-                locationBias: {
-                    circle: {
-                        center: {
-                            latitude: parseFloat(lat),
-                            longitude: parseFloat(lng)
-                        },
-                        radius: parseFloat(distance) * 10 // Convert distance to meters
-                    }
+    //             textQuery: "Stazioni di ricarica",
+    //             pageSize: distance*2 || 10,
+    //             evOptions: {
+    //                 minimumChargingRateKw: 1
+    //             },
+    //             locationBias: {
+    //                 circle: {
+    //                     center: {
+    //                         latitude: parseFloat(lat),
+    //                         longitude: parseFloat(lng)
+    //                     },
+    //                     radius: parseFloat(distance) * 10 // Convert distance to meters
+    //                 }
 
-                }
-            }),
-        });
+    //             }
+    //         }),
+    //     });
 
-        if (response.status === 200) {
-            const googleData = await response.json();
-            if (googleData.places.length > 0) {
-                googleStations = googleData.places.map(async station => {
-                    const avgPower = response.evChargeOptions?.connectorAggregation.maxChargeRateKw || 50; // Usa la potenza media se disponibile, altrimenti 50 kW
-                    let stimaPrezzo = null;
+        // if (response.status === 200) {
+        //     const googleData = await response.json();
+        //     if (googleData.places.length > 0) {
+        //         googleStations = googleData.places.map(async station => {
+        //             const avgPower = response.evChargeOptions?.connectorAggregation.maxChargeRateKw || 50; // Usa la potenza media se disponibile, altrimenti 50 kW
+        //             let stimaPrezzo = null;
 
-                    if (avgPower > 0) {
-                        // Stima basata su tariffe medie in Italia
-                        if (avgPower < 11) stimaPrezzo = 0.40; // AC lenta
-                        else if (avgPower < 50) stimaPrezzo = 0.50; // AC veloce
-                        else if (avgPower < 100) stimaPrezzo = 0.60; // DC veloce
-                        else stimaPrezzo = 0.70; // DC ultra veloce
-                    }
-                    const locality = station.addressComponents?.find(component => 
-                        component?.types && Array.isArray(component.types) && 
-                        component.types.includes("administrative_area_level_3"))?.shortText || "N/D";
+        //             if (avgPower > 0) {
+        //                 // Stima basata su tariffe medie in Italia
+        //                 if (avgPower < 11) stimaPrezzo = 0.40; // AC lenta
+        //                 else if (avgPower < 50) stimaPrezzo = 0.50; // AC veloce
+        //                 else if (avgPower < 100) stimaPrezzo = 0.60; // DC veloce
+        //                 else stimaPrezzo = 0.70; // DC ultra veloce
+        //             }
+        //             const locality = station.addressComponents?.find(component => 
+        //                 component?.types && Array.isArray(component.types) && 
+        //                 component.types.includes("administrative_area_level_3"))?.shortText || "N/D";
 
-                    const provincia = station.addressComponents?.find(component => 
-                        component?.types && Array.isArray(component.types) && 
-                        component.types.includes("administrative_area_level_2"))?.shortText || "N/D";
+        //             const provincia = station.addressComponents?.find(component => 
+        //                 component?.types && Array.isArray(component.types) && 
+        //                 component.types.includes("administrative_area_level_2"))?.shortText || "N/D";
 
-                    return {
-                        id_stazione: station.id,
-                        tipo_stazione: 'Elettrica',
-                        bandiera: station.displayName.text + station.evChargeOptions.connectorCount.text || "N/D",
-                        dettagli_stazione: {
-                            gestore: station.displayName.text + station.evChargeOptions.connectorCount.text || "N/D",
-                            tipo: "Elettrica",
-                            nome: station.displayName.text + station.evChargeOptions.connectorCount.text || "Stazione di ricarica"
-                        },
-                        indirizzo: {
-                            via: station.formattedAddress || "N/D",
-                            comune: locality || "N/D",
-                            provincia: provincia || "N/D"
-                        },
-                        maps: {
-                            lat: station.location.latitude,
-                            lon: station.location.longitude
-                        },
-                        distanza: calculateDistance(userLat, userLng, parseFloat(station.location.latitude), parseFloat(station.location.longitude)),
-                        prezzi_carburanti: [{
-                            tipo: response.evChargeOptions?.connectorAggregation.type || "Generico",
-                            potenza_kw: avgPower,
-                            prezzo: stimaPrezzo, // €/kWh stimato
-                            unita_misura: "€/kWh (stimato)",
-                            self_service: true,
-                            ultimo_aggiornamento: new Date().toISOString().split('T')[0]
-                        }]
-                    };
-                });
-            }
-        } else {
-            console.error('Errore Google Places API:', response.statusText);
-        }
-    } catch (error) {
-        console.error('Errore durante il recupero delle stazioni da Google Places API:', error.message);
-    }
-    googleStations = await Promise.all(googleStations);
+        //             return {
+        //                 id_stazione: station.id,
+        //                 tipo_stazione: 'Elettrica',
+        //                 bandiera: station.displayName.text + station.evChargeOptions.connectorCount.text || "N/D",
+        //                 dettagli_stazione: {
+        //                     gestore: station.displayName.text + station.evChargeOptions.connectorCount.text || "N/D",
+        //                     tipo: "Elettrica",
+        //                     nome: station.displayName.text + station.evChargeOptions.connectorCount.text || "Stazione di ricarica"
+        //                 },
+        //                 indirizzo: {
+        //                     via: station.formattedAddress || "N/D",
+        //                     comune: locality || "N/D",
+        //                     provincia: provincia || "N/D"
+        //                 },
+        //                 maps: {
+        //                     lat: station.location.latitude,
+        //                     lon: station.location.longitude
+        //                 },
+        //                 distanza: calculateDistance(userLat, userLng, parseFloat(station.location.latitude), parseFloat(station.location.longitude)),
+        //                 prezzi_carburanti: [{
+        //                     tipo: response.evChargeOptions?.connectorAggregation.type || "Generico",
+        //                     potenza_kw: avgPower,
+        //                     prezzo: stimaPrezzo, // €/kWh stimato
+        //                     unita_misura: "€/kWh (stimato)",
+        //                     self_service: true,
+        //                     ultimo_aggiornamento: new Date().toISOString().split('T')[0]
+        //                 }]
+        //             };
+        //         });
+        //     }
+        // } else {
+        //     console.error('Errore Google Places API:', response.statusText);
+        // }
+    // } catch (error) {
+    //     console.error('Errore durante il recupero delle stazioni da Google Places API:', error.message);
+    // }
+    googleStations = []; //await Promise.all(googleStations);
 
     // Unisci le stazioni di Google con le altre
     const allStations = [...gasolineStations, ...googleStations]
@@ -616,9 +616,9 @@ app.get('/file-info', (req, res) => {
 // Aggiungi un nuovo endpoint /gas-stations-by-fuel che accetta i parametri lat, lng, distance e TipoFuel, e restituisce solo le stazioni di benzina che hanno almeno un prezzo per quel tipo di carburante (TipoFuel). Il filtro viene applicato sui prezzi_carburanti.
 app.get('/gas-stations-by-fuel', async (req, res) => {
 
-    if(req.get('host').includes("gas-stations-api.vercel.app")){
-        return res.redirect('https://nas-lorenzo.tailc6d193.ts.net'+req.originalUrl);
-    } 
+        // if(req.get('host').includes("gas-stations-api.vercel.app")){
+        //     return res.redirect('https://nas-lorenzo.tailc6d193.ts.net'+req.originalUrl);
+        // } 
     await updateDataIfNeeded();
 
     const { lat, lng, distance, TipoFuel } = req.query;
@@ -685,7 +685,6 @@ app.get('/gas-stations-by-fuel', async (req, res) => {
             prezzi_carburanti: pricesForFuel
         });
     }
-
     // Ordina per distanza e limita il numero di risultati
     const allStations = gasolineStations
         .sort((a, b) => a.distanza - b.distanza)
