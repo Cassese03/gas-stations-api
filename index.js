@@ -49,6 +49,13 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
     return R * c;
 }
 
+function formatPriceLastUpdate(value) {
+    const raw = (value || '').trim();
+    const match = raw.match(/^(\d{2}\/\d{2}\/\d{4})\s+(\d{2})(\d{2})(\d{2})$/);
+    if (!match) return raw;
+    return `${match[1]} ${match[2]}:${match[3]}:${match[4]}`;
+}
+
 // Rilevamento dell'ambiente Vercel
 const isVercel = process.env.VERCEL === '1' || process.env.VERCEL_ENV;
 
@@ -164,7 +171,7 @@ async function updateDataIfNeeded() {
                         tipo: price['_1'],
                         prezzo: parseFloat((price['_2'] || '').replace(',', '.')) || null,
                         self_service: price['_3'] === '1',
-                        ultimo_aggiornamento: price['_4']
+                        ultimo_aggiornamento: formatPriceLastUpdate(price['_4'])
                     };
                     if (!pricesByStationAndFuel[stationId]) pricesByStationAndFuel[stationId] = Object.create(null);
                     if (!pricesByStationAndFuel[stationId][fuelType]) pricesByStationAndFuel[stationId][fuelType] = [];
@@ -272,7 +279,7 @@ app.get('/gas-stations', async (req, res) => {
                     tipo: price['_1'],
                     prezzo: parseFloat(price['_2']?.replace(',', '.')) || null,
                     self_service: price['_3'] === '1',
-                    ultimo_aggiornamento: price['_4']
+                    ultimo_aggiornamento: formatPriceLastUpdate(price['_4'])
                 }))
             };
         });
