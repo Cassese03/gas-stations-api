@@ -2,7 +2,7 @@ name: Aggiorna CSV Anagrafica Impianti
 
 on:
   schedule:
-    - cron: '0 * * * *' # ogni giorno alle 5:00 UTC (7:00 italiane)
+  - cron: '0 */3 * * *' # Scatta alle 00:00, 03:00, 06:00, 09:00, ecc. (UTC) al minuto 0 di ogni 3 ore 
   workflow_dispatch: # permette anche di farlo partire a mano
 
 jobs:
