@@ -2,7 +2,7 @@ name: Aggiorna CSV Prezzo alle 8
 
 on:
   schedule:
-    - cron: '5 * * * *' # ogni giorno alle 5:00 UTC (7:00 italiane)
+    - cron: '5 */3 * * *' # Scatta alle 00:05, 03:05, 06:05, 09:05, ecc. (UTC) al minuto 5 di ogni 3 ore 
   workflow_dispatch: # permette anche di avviarlo manualmente
 
 jobs:
