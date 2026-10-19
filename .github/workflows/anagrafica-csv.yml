@@ -16,7 +16,7 @@ jobs:
     - name: Scarica CSV dal MIMIT
       run: |
         mkdir -p ./public/data
-        curl -L --retry 5 --retry-delay 10 https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv -o ./public/data/anagrafica_impianti_attivi.csv
+        curl -L --retry 3 --retry-delay 5 "http://api.scraperapi.com?api_key=${{ secrets.SCRAPER_API_KEY }}&url=https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv" -o ./public/data/anagrafica_impianti_attivi.csv
 
     - name: Rimuovi caratteri 
       run: |
