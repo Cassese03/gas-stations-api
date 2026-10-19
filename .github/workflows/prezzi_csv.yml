@@ -16,7 +16,7 @@ jobs:
     - name: Scarica CSV dal MIMIT (prezzo_alle_8.csv)
       run: |
         mkdir -p ./public/data
-        curl -L --retry 5 --retry-delay 10 https://www.mimit.gov.it/images/exportCSV/prezzo_alle_8.csv -o ./public/data/prezzo_alle_8.csv
+        curl -L --retry 5 --retry-delay 10 https://www.mimit.gov.it/images/exportCSV/prezzo_alle_8.csv
     - name: Rimuovi caratteri 
       run: |
         sed -i 's/"//g' ./public/data/prezzo_alle_8.csv
